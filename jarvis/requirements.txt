@@ -1,0 +1,22 @@
+# Nado / JARVIS — Python dependencies (100 % free, no API keys)
+# Install with: python3 -m pip install -r requirements.txt
+#
+# Before installing, handle the OS-specific PyAudio requirement:
+#   macOS   → brew install portaudio
+#   Ubuntu  → sudo apt install portaudio19-dev python3-pyaudio -y
+#   Windows → pip install pipwin && pipwin install pyaudio
+
+# Local LLM client (talks to Ollama server)
+ollama>=0.3.0
+
+# Speech recognition — uses Google Web Speech API (free, no key needed)
+SpeechRecognition>=3.10.4
+
+# Offline Text-to-Speech (uses OS built-in engine — no internet needed)
+pyttsx3>=2.90
+
+# Computer control
+pyautogui>=0.9.54
+
+# Audio I/O (required by SpeechRecognition for microphone access)
+pyaudio>=0.2.14
