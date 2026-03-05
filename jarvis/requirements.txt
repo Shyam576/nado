@@ -12,6 +12,10 @@ ollama>=0.3.0
 # Speech recognition — uses Google Web Speech API (free, no key needed)
 SpeechRecognition>=3.10.4
 
+# Offline Speech-to-Text — Whisper (local, no API key, much more accurate)
+openai-whisper>=20231117
+scipy>=1.11.0          # audio resampling to 16 kHz for Whisper
+
 # Offline Text-to-Speech (uses OS built-in engine — no internet needed)
 pyttsx3>=2.90
 

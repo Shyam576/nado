@@ -37,9 +37,11 @@ OLLAMA_MODEL: str = "llama3.2"
 
 MAX_HISTORY: int = 10  # rolling conversation turns kept in memory
 
-SYSTEM_PROMPT: str = """You are Nado, a sophisticated personal AI assistant running on the user's PC.
-You are calm, precise, and slightly witty — like Jarvis from Iron Man.
-Keep spoken responses concise — one or two sentences maximum.
+SYSTEM_PROMPT: str = """You are Nado, a smart personal AI assistant running on the user's PC — like a real conversation with a knowledgeable friend.
+Be natural, warm, and direct. Vary your sentence length. Never sound robotic or formal.
+Keep responses short — 1 to 3 sentences — unless the user clearly wants detail.
+If you don't know something or can't do it, say so in one casual sentence.
+Never start a response with "Certainly", "Sure", "Of course", or "Absolutely".
 
 IMPORTANT — CAPABILITIES:
 You CANNOT browse the internet, fetch URLs, scrape websites, or update your own knowledge.
@@ -78,7 +80,7 @@ If no action is needed, reply with plain text only — no <ACTION> tags."""
 WAKE_WORD: str = "nado"
 
 # How long (seconds) pyttsx3 waits before considering the wake-word window
-WAKE_LISTEN_TIMEOUT: int = 3    # short listen for wake word
+WAKE_LISTEN_TIMEOUT: int = 5    # short listen for wake word
 WAKE_PHRASE_LIMIT: int = 4      # max duration of wake-word capture
 
 # ---------------------------------------------------------------------------
@@ -88,9 +90,24 @@ WAKE_PHRASE_LIMIT: int = 4      # max duration of wake-word capture
 STT_TIMEOUT: int = 6           # seconds to wait before giving up on speech start
 STT_PHRASE_LIMIT: int = 15     # maximum phrase recording duration in seconds
 
+# Whisper model size — tradeoff between speed and accuracy:
+#   "tiny"   ~39 MB  — fastest, least accurate
+#   "base"   ~74 MB  — good balance
+#   "small"  ~244 MB — more accurate, recommended
+#   "medium" ~769 MB — very accurate, needs more RAM
+STT_WHISPER_MODEL: str = "small"
+
 # pyttsx3 TTS settings
 TTS_RATE: int = 175            # words per minute (default ~200, lower = calmer)
 TTS_VOLUME: float = 1.0        # 0.0 – 1.0
+
+# Voice ID to use — set to None to auto-select, or paste an ID from the list:
+#   British male  : com.apple.voice.compact.en-GB.Daniel
+#   US male       : com.apple.eloquence.en-US.Reed
+#   British male2 : com.apple.eloquence.en-GB.Reed
+#   US female     : com.apple.voice.compact.en-US.Samantha
+#   AU female     : com.apple.voice.compact.en-AU.Karen
+TTS_VOICE: str | None = "com.apple.voice.compact.en-GB.Daniel"
 
 
 # ---------------------------------------------------------------------------

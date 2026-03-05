@@ -28,8 +28,8 @@ from typing import Optional
 
 from actions import parse_and_execute
 from brain import ask
-from config import WAKE_WORD, WAKE_LISTEN_TIMEOUT, WAKE_PHRASE_LIMIT, validate_config
-from voice import listen, play_acknowledgement, speak
+from config import validate_config
+from voice import listen, speak, calibrate_microphone
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -73,100 +73,28 @@ def process_input(user_text: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Wake word detection helpers
-# ---------------------------------------------------------------------------
-
-
-def _contains_wake_word(text: str) -> bool:
-    """Return True if the wake word appears in the transcribed text.
-
-    Matches whole-word occurrences to avoid false positives like "tornado".
-
-    Args:
-        text: Lower-case transcription to check.
-
-    Returns:
-        True if the wake word is present.
-    """
-    import re
-    pattern = rf"\b{re.escape(WAKE_WORD.lower())}\b"
-    return bool(re.search(pattern, text))
-
-
-def _strip_wake_word(text: str) -> str:
-    """Remove the wake word (and optional punctuation) from the start of text.
-
-    E.g. "nado open spotify" → "open spotify"
-
-    Args:
-        text: Lower-case text that contains the wake word.
-
-    Returns:
-        The text with the wake word prefix removed, stripped of whitespace.
-    """
-    import re
-    cleaned = re.sub(
-        rf"^\s*{re.escape(WAKE_WORD.lower())}[\s,!?.]*",
-        "",
-        text,
-        flags=re.IGNORECASE,
-    ).strip()
-    return cleaned
-
-
-# ---------------------------------------------------------------------------
-# Voice mode
+# Voice mode  (always-on — no wake word required)
 # ---------------------------------------------------------------------------
 
 
 def voice_mode() -> None:
-    """Run the full voice pipeline with speech-based wake word detection.
+    """Run the always-on voice pipeline.
 
-    Continuously listens for short audio snippets, detects the wake word,
-    then captures and processes the full command.  Blocks indefinitely;
-    press Ctrl-C to exit.
+    Listens continuously and responds to every utterance — no wake word needed.
+    Press Ctrl-C to exit.
     """
     _check_config_or_warn()
+    calibrate_microphone()
 
-    speak("Nado online. How can I help?")
-    logger.info("Wake word listening active. Say '%s' to activate.", WAKE_WORD)
-    print(f"\n[Listening for wake word: '{WAKE_WORD}'] — Ctrl-C to exit\n")
+    speak("Nado online. I'm listening.")
+    print("\n[Voice mode] Speak anytime — Ctrl-C to exit\n")
 
     try:
         while True:
-            # --- Step 1: short listen for the wake word ----------------------
-            snippet = listen(
-                timeout=WAKE_LISTEN_TIMEOUT,
-                phrase_time_limit=WAKE_PHRASE_LIMIT,
-            )
-
-            if snippet is None:
-                # Silence or error — keep looping quietly
-                continue
-
-            logger.debug("Wake check snippet: '%s'", snippet)
-
-            if not _contains_wake_word(snippet):
-                continue
-
-            # --- Step 2: wake word detected ----------------------------------
-            logger.info("Wake word detected in: '%s'", snippet)
-            play_acknowledgement()
-
-            # Check whether the command was given in the same utterance
-            inline_command = _strip_wake_word(snippet)
-
-            if inline_command:
-                # e.g. user said "Nado open Spotify" in one breath
-                process_input(inline_command)
-            else:
-                # Wake word was alone — listen for the actual command
-                command = listen()
-                if command:
-                    process_input(command)
-                else:
-                    logger.info("No command heard after wake word.")
-
+            command = listen()
+            if command:
+                print(f"\n[You]: {command}")
+                process_input(command)
     except KeyboardInterrupt:
         logger.info("Shutdown requested.")
         speak("Shutting down. Goodbye.")
