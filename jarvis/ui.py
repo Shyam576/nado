@@ -67,17 +67,25 @@ class _NadoUI:
             border_style="cyan",
         )
 
+        # Only render the last 6 messages so the panel never overflows
+        MAX_VISIBLE = 6
+        hidden = max(0, len(msgs) - MAX_VISIBLE)
+        visible = msgs[-MAX_VISIBLE:] if msgs else []
+
         body = Text()
-        if msgs:
-            for i, (role, text) in enumerate(msgs):
+        if hidden:
+            body.append(f"  ↑ {hidden} earlier message{'s' if hidden > 1 else ''} above\n\n",
+                        style="dim italic")
+        if visible:
+            for i, (role, text) in enumerate(visible):
                 if i:
                     body.append("\n\n")
                 if role == "user":
                     body.append("  You  ›  ", style="bold bright_white")
-                    body.append(text,              style="white")
+                    body.append(text,          style="white")
                 else:
                     body.append("  Nado ›  ", style="bold cyan")
-                    body.append(text,              style="bright_cyan")
+                    body.append(text,          style="bright_cyan")
         else:
             body.append("\n  Say something to get started…", style="dim italic")
 
