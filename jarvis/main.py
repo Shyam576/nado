@@ -65,8 +65,10 @@ def process_input(user_text: str) -> None:
         logger.info("Action result: %s", action_result)
 
     if clean_reply:
+        print(f"\n[Nado]: {clean_reply}\n")
         speak(clean_reply)
     elif action_result:
+        print("\n[Nado]: Done.\n")
         speak("Done.")
 
 
@@ -126,7 +128,7 @@ def voice_mode() -> None:
     """
     _check_config_or_warn()
 
-    speak("JARVIS online. How can I help?")
+    speak("Nado online. How can I help?")
     logger.info("Wake word listening active. Say '%s' to activate.", WAKE_WORD)
     print(f"\n[Listening for wake word: '{WAKE_WORD}'] — Ctrl-C to exit\n")
 
@@ -184,7 +186,7 @@ def text_mode() -> None:
 
     from brain import clear_history
 
-    speak("JARVIS online. How can I help?")
+    speak("Nado online. How can I help?")
     print("\n[Text mode] Type your message and press Enter. ('quit' to exit)\n")
 
     while True:

@@ -61,16 +61,32 @@ python -m pip install -r requirements.txt
 
 **No API key needed** — Ollama runs 100 % on your machine.
 
-### macOS / Linux
+### macOS
+
+```bash
+# Option A — Homebrew (easiest)
+brew install ollama
+
+# Option B — download the .dmg from https://ollama.com/download
+# then drag Ollama to Applications and launch it
+
+# Pull a model (llama3.2 is small and fast, ~2 GB)
+ollama pull llama3.2
+
+# Start the server (skip if you launched the macOS app — it auto-starts)
+ollama serve
+```
+
+### Linux
 
 ```bash
 # 1. Install Ollama
 curl -fsSL https://ollama.com/install.sh | sh
 
-# 2. Pull a model (llama3.2 is small and fast, ~2 GB)
+# 2. Pull a model
 ollama pull llama3.2
 
-# 3. Start the server (leave this running in a terminal)
+# 3. Start the server
 ollama serve
 ```
 
