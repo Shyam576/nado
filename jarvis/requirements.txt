@@ -9,6 +9,9 @@
 # Local LLM client (talks to Ollama server)
 ollama>=0.3.0
 
+# Terminal TUI (voice mode full-screen display)
+rich>=13.0.0
+
 # Speech recognition — uses Google Web Speech API (free, no key needed)
 SpeechRecognition>=3.10.4
 

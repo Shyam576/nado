@@ -29,6 +29,7 @@ from typing import Optional
 from actions import parse_and_execute
 from brain import ask
 from config import validate_config
+import ui
 from voice import listen, speak, calibrate_microphone
 
 # ---------------------------------------------------------------------------
@@ -56,6 +57,7 @@ def process_input(user_text: str) -> None:
     """
     logger.info("Processing: '%s'", user_text)
 
+    ui.set_state("thinking")
     reply = ask(user_text)
     logger.debug("Raw reply: %s", reply)
 
@@ -65,10 +67,14 @@ def process_input(user_text: str) -> None:
         logger.info("Action result: %s", action_result)
 
     if clean_reply:
-        print(f"\n[Nado]: {clean_reply}\n")
+        ui.add_nado(clean_reply)
+        if not ui.is_active():
+            print(f"\n[Nado]: {clean_reply}\n")
         speak(clean_reply)
     elif action_result:
-        print("\n[Nado]: Done.\n")
+        ui.add_nado("Done.")
+        if not ui.is_active():
+            print("\n[Nado]: Done.\n")
         speak("Done.")
 
 
@@ -84,20 +90,24 @@ def voice_mode() -> None:
     Press Ctrl-C to exit.
     """
     _check_config_or_warn()
+
+    ui.start()
+    ui.set_state("starting")
     calibrate_microphone()
 
     speak("Kuzu zangpo nah-doh. I'm listening.")
-    print("\n[Voice mode] Speak anytime — Ctrl-C to exit\n")
 
     try:
         while True:
             command = listen()
             if command:
-                print(f"\n[You]: {command}")
+                ui.add_user(command)
                 process_input(command)
     except KeyboardInterrupt:
         logger.info("Shutdown requested.")
         speak("Shutting down. Goodbye.")
+    finally:
+        ui.stop()
 
 
 # ---------------------------------------------------------------------------

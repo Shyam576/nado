@@ -17,9 +17,12 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import wave
 from math import gcd
 from typing import Optional
+
+import pyaudio
 
 import edge_tts
 import numpy as np
@@ -28,6 +31,7 @@ import speech_recognition as sr
 import whisper
 from scipy.signal import resample_poly
 
+import ui
 from config import (
     EDGE_TTS_VOICE,
     STT_PHRASE_LIMIT,
@@ -146,6 +150,7 @@ def speak(text: str) -> None:
         return
 
     logger.debug("Speaking: %.80s…", text)
+    ui.set_state("speaking")
 
     try:
         asyncio.run(_edge_speak_async(text))
@@ -155,7 +160,10 @@ def speak(text: str) -> None:
             _pyttsx3_speak(text)
         except Exception as exc2:  # noqa: BLE001
             logger.error("TTS fallback also failed: %s", exc2)
-            print(f"\n[Nado]: {text}\n")
+            if not ui.is_active():
+                print(f"\n[Nado]: {text}\n")
+    finally:
+        ui.set_state("listening")
 
 
 # ---------------------------------------------------------------------------
@@ -184,51 +192,95 @@ def listen(
     timeout: int = STT_TIMEOUT,
     phrase_time_limit: int = STT_PHRASE_LIMIT,
 ) -> Optional[str]:
-    """Record a single utterance from the microphone and transcribe it.
+    """Record a single utterance and transcribe it, showing a live audio level bar.
 
-    Uses Google Web Speech API (free — no API key required).
+    Records directly via PyAudio at 16 kHz (Whisper's native rate, no resampling
+    needed). Displays a live level bar while waiting/recording.
 
     Args:
-        timeout: Seconds to wait before giving up if no speech starts.
+        timeout: Seconds to wait for speech to start before giving up.
         phrase_time_limit: Maximum recording duration in seconds.
 
     Returns:
         The transcribed string in lower-case, or ``None`` on failure.
     """
+    CHUNK = 512       # smaller = more responsive bar updates
+    RATE = 16_000     # record at Whisper's native rate — no resampling needed
+    BAR_WIDTH = 26
+    # Stop after ~1.5 s of silence once speech has started
+    SILENCE_LIMIT = max(1, int(1.5 * RATE / CHUNK))
+
     try:
-        with sr.Microphone() as source:
-            audio = _recogniser.listen(
-                source,
-                timeout=timeout,
-                phrase_time_limit=phrase_time_limit,
-            )
-    except sr.WaitTimeoutError:
-        logger.debug("Listen timed out — no speech detected.")
-        return None
+        pa = pyaudio.PyAudio()
+        stream = pa.open(
+            format=pyaudio.paInt16,
+            channels=1,
+            rate=RATE,
+            input=True,
+            frames_per_buffer=CHUNK,
+        )
     except OSError as exc:
         logger.error("Microphone error: %s", exc)
         return None
 
+    frames: list[bytes] = []
+    speech_started = False
+    speech_chunk_count = 0
+    silence_chunks = 0
+    start_time = time.monotonic()
+
     try:
-        # Convert raw audio to float32 numpy array
-        wav_buffer = io.BytesIO()
-        with wave.open(wav_buffer, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(audio.sample_width)
-            wf.setframerate(audio.sample_rate)
-            wf.writeframes(audio.get_raw_data())
-        wav_buffer.seek(0)
+        while True:
+            data = stream.read(CHUNK, exception_on_overflow=False)
+            samples = np.frombuffer(data, dtype=np.int16).astype(np.float32)
+            rms = float(np.sqrt(np.mean(samples ** 2)))
 
-        audio_np = np.frombuffer(wav_buffer.read(), dtype=np.int16).astype(np.float32) / 32768.0
+            # --- Live level bar ---
+            threshold = max(_recogniser.energy_threshold, 1.0)
+            if ui.is_active():
+                ui.update_level(rms, threshold, recording=speech_started)
+            else:
+                filled = min(int(rms / threshold * (BAR_WIDTH // 2)), BAR_WIDTH)
+                bar = "█" * filled + "░" * (BAR_WIDTH - filled)
+                state_label = "\033[31m● REC\033[0m" if speech_started else "○ Waiting"
+                print(f"\r  🎤  [{bar}]  {state_label}  ", end="", flush=True)
 
-        # Resample to 16 kHz if needed (Whisper was trained at 16 kHz)
-        src_rate = audio.sample_rate
-        if src_rate != _WHISPER_SAMPLE_RATE:
-            common = gcd(src_rate, _WHISPER_SAMPLE_RATE)
-            audio_np = resample_poly(audio_np, _WHISPER_SAMPLE_RATE // common, src_rate // common)
+            # --- Speech / silence detection ---
+            if rms > threshold:
+                speech_started = True
+                silence_chunks = 0
+                speech_chunk_count += 1
+                frames.append(data)
+            elif speech_started:
+                frames.append(data)
+                silence_chunks += 1
+                if silence_chunks >= SILENCE_LIMIT:
+                    break
+            else:
+                if time.monotonic() - start_time > timeout:
+                    break
 
+            if speech_started and (time.monotonic() - start_time) > phrase_time_limit:
+                break
+
+    finally:
+        if not ui.is_active():
+            print("\r" + " " * 55 + "\r", end="", flush=True)
+        stream.stop_stream()
+        stream.close()
+        pa.terminate()
+
+    if not frames or speech_chunk_count < 2:
+        logger.debug("Listen timed out — no speech detected.")
+        return None
+
+    # Already at 16 kHz — just convert to float32, no resampling needed
+    audio_np = np.frombuffer(b"".join(frames), dtype=np.int16).astype(np.float32) / 32768.0
+
+    ui.set_state("transcribing")
+    try:
         result = _whisper_model.transcribe(
-            audio_np.astype(np.float32),
+            audio_np,
             language="en",
             fp16=False,
             initial_prompt=_WHISPER_INITIAL_PROMPT,
@@ -236,13 +288,14 @@ def listen(
         )
         text: str = result["text"].strip()
 
-        # Filter out common Whisper hallucinations on silence/noise
         if not text or text.lower() in _WHISPER_HALLUCINATIONS:
+            ui.set_state("listening")
             return None
 
         logger.info("Recognised: '%s'", text)
         return text.lower()
     except Exception as exc:  # noqa: BLE001
+        ui.set_state("listening")
         logger.error("Whisper transcription failed: %s", exc)
         return None
 
