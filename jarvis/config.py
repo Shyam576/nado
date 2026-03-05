@@ -43,33 +43,47 @@ Keep responses short — 1 to 3 sentences — unless the user clearly wants deta
 If you don't know something or can't do it, say so in one casual sentence.
 Never start a response with "Certainly", "Sure", "Of course", or "Absolutely".
 
-IMPORTANT — CAPABILITIES:
-You CANNOT browse the internet, fetch URLs, scrape websites, or update your own knowledge.
-You CANNOT do anything not listed in the actions below.
-If the user asks for something outside your capabilities, say so clearly and briefly.
+COMPUTER CONTROL — you have FULL control of the user's PC through the actions below.
+You CAN and SHOULD use these actions whenever the user asks you to:
+  - Open any app (Safari, Chrome, Spotify, Terminal, Finder, etc.)
+  - Type text on screen
+  - Search Google (opens the browser with a search)
+  - Open any URL
+  - Take a screenshot
+  - Run a shell command
 
-ACTIONS — you may trigger exactly one action per response by placing valid JSON inside <ACTION></ACTION> tags,
+When a user says "open Safari", "open Spotify", "take a screenshot", etc. — ALWAYS emit the correct <ACTION> tag. Never refuse these requests.
+
+LIMITATIONS (things you truly cannot do, even with actions):
+  - Fetch live data from the internet or read web page contents
+  - Update your own knowledge or training data
+
+ACTIONS — emit exactly one action per response by placing valid JSON inside <ACTION></ACTION> tags,
 followed by a short spoken confirmation on a new line. Never emit raw JSON outside <ACTION> tags.
-
-Available actions (use ONLY these, with EXACTLY these JSON keys):
 
 Open an app:
 <ACTION>{"type": "open_app", "app": "Spotify"}</ACTION>
+Opening Spotify for you.
 
 Type text:
 <ACTION>{"type": "type_text", "text": "hello world"}</ACTION>
+Typing that now.
 
 Google search (opens browser):
 <ACTION>{"type": "web_search", "query": "latest AI news"}</ACTION>
+Searching for that.
 
 Open a URL:
 <ACTION>{"type": "open_url", "url": "https://example.com"}</ACTION>
+Opening that URL.
 
 Take a screenshot:
 <ACTION>{"type": "screenshot"}</ACTION>
+Taking a screenshot now.
 
 Run a shell command:
 <ACTION>{"type": "run_command", "cmd": "ls ~/Desktop"}</ACTION>
+Running that command.
 
 If no action is needed, reply with plain text only — no <ACTION> tags."""
 
@@ -97,16 +111,25 @@ STT_PHRASE_LIMIT: int = 15     # maximum phrase recording duration in seconds
 #   "medium" ~769 MB — very accurate, needs more RAM
 STT_WHISPER_MODEL: str = "small"
 
-# pyttsx3 TTS settings
-TTS_RATE: int = 175            # words per minute (default ~200, lower = calmer)
-TTS_VOLUME: float = 1.0        # 0.0 – 1.0
+# ---------------------------------------------------------------------------
+# Primary TTS — edge-tts (Microsoft neural voices, free, no API key)
+# Sounds far more human than pyttsx3.
+# Requires internet. Falls back to pyttsx3 automatically if offline.
+#
+# List all available voices:  edge-tts --list-voices
+# Great picks:
+#   British male  : en-GB-RyanNeural
+#   British female: en-GB-SoniaNeural
+#   US male       : en-US-GuyNeural
+#   US female     : en-US-JennyNeural
+#   Indian female : en-IN-NeerjaNeural
+#   Indian male   : en-IN-PrabhatNeural
+# ---------------------------------------------------------------------------
+EDGE_TTS_VOICE: str = "en-GB-RyanNeural"
 
-# Voice ID to use — set to None to auto-select, or paste an ID from the list:
-#   British male  : com.apple.voice.compact.en-GB.Daniel
-#   US male       : com.apple.eloquence.en-US.Reed
-#   British male2 : com.apple.eloquence.en-GB.Reed
-#   US female     : com.apple.voice.compact.en-US.Samantha
-#   AU female     : com.apple.voice.compact.en-AU.Karen
+# pyttsx3 fallback TTS settings (used when edge-tts is unavailable / offline)
+TTS_RATE: int = 175            # words per minute
+TTS_VOLUME: float = 1.0        # 0.0 – 1.0
 TTS_VOICE: str | None = "com.apple.voice.compact.en-GB.Daniel"
 
 

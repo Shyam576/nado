@@ -16,11 +16,19 @@ SpeechRecognition>=3.10.4
 openai-whisper>=20231117
 scipy>=1.11.0          # audio resampling to 16 kHz for Whisper
 
-# Offline Text-to-Speech (uses OS built-in engine — no internet needed)
+# Text-to-Speech
+# Primary: edge-tts — Microsoft neural voices (free, no API key, very human-sounding)
+#   Install: pip install edge-tts
+#   List voices: edge-tts --list-voices
+edge-tts>=7.0.0
+
+# Fallback TTS (offline, used if edge-tts fails / no internet)
 pyttsx3>=2.90
 
 # Computer control
 pyautogui>=0.9.54
+Pillow>=10.0.0         # required by pyautogui for screenshots on non-macOS
+pyscreeze>=0.1.28      # required by pyautogui for screenshots
 
 # Audio I/O (required by SpeechRecognition for microphone access)
 pyaudio>=0.2.14

@@ -1,22 +1,27 @@
 """
 voice.py — Speech-to-Text (STT) and Text-to-Speech (TTS) for the Nado assistant.
 
-STT : SpeechRecognition library with Google Web Speech API (free, no key needed).
-TTS : pyttsx3 — fully offline, uses the OS's built-in speech engine.
-      macOS   → uses NSSpeechSynthesizer (many voices available in System Settings)
-      Windows → uses SAPI5
-      Linux   → uses eSpeak
+STT : SpeechRecognition + Whisper (local, no API key).
+TTS : edge-tts (primary) — Microsoft neural voices, free, no API key, human-sounding.
+      Falls back to pyttsx3 automatically when offline.
+      macOS playback via afplay (built-in), Windows via PowerShell, Linux via mpg123.
 
 No API keys required.
 """
 
+import asyncio
 import io
 import logging
+import os
+import subprocess
+import sys
+import tempfile
 import threading
 import wave
 from math import gcd
 from typing import Optional
 
+import edge_tts
 import numpy as np
 import pyttsx3
 import speech_recognition as sr
@@ -24,6 +29,7 @@ import whisper
 from scipy.signal import resample_poly
 
 from config import (
+    EDGE_TTS_VOICE,
     STT_PHRASE_LIMIT,
     STT_TIMEOUT,
     STT_WHISPER_MODEL,
@@ -98,11 +104,40 @@ def _make_tts_engine() -> pyttsx3.Engine:
 # ---------------------------------------------------------------------------
 
 
-def speak(text: str) -> None:
-    """Convert text to speech and play it through the default audio output.
+async def _edge_speak_async(text: str) -> None:
+    """Generate speech with edge-tts and play it via the OS audio player."""
+    communicate = edge_tts.Communicate(text, EDGE_TTS_VOICE)
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+        tmp_path = f.name
+    try:
+        await communicate.save(tmp_path)
+        if sys.platform == "darwin":
+            subprocess.run(["afplay", tmp_path], check=True)
+        elif sys.platform == "win32":
+            subprocess.run(["powershell", "-c", f'(New-Object Media.SoundPlayer "{tmp_path}").PlaySync()'], check=True)
+        else:
+            # Linux — install mpg123: sudo apt install mpg123
+            subprocess.run(["mpg123", "-q", tmp_path], check=True)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
-    Creates a fresh pyttsx3 engine each call to avoid macOS event-loop
-    corruption that causes intermittent silent failures.
+
+def _pyttsx3_speak(text: str) -> None:
+    """Fallback TTS using pyttsx3 (offline, robotic but always works)."""
+    with _tts_lock:
+        engine = _make_tts_engine()
+        engine.say(text)
+        engine.runAndWait()
+        engine.stop()
+
+
+def speak(text: str) -> None:
+    """Convert text to speech using edge-tts (Microsoft neural voices).
+
+    Falls back to pyttsx3 automatically if edge-tts fails (e.g. no internet).
 
     Args:
         text: The string to be spoken aloud.
@@ -113,14 +148,14 @@ def speak(text: str) -> None:
     logger.debug("Speaking: %.80s…", text)
 
     try:
-        with _tts_lock:
-            engine = _make_tts_engine()
-            engine.say(text)
-            engine.runAndWait()
-            engine.stop()
+        asyncio.run(_edge_speak_async(text))
     except Exception as exc:  # noqa: BLE001
-        logger.error("TTS failed: %s", exc)
-        print(f"\n[Nado]: {text}\n")
+        logger.warning("edge-tts failed (%s); falling back to pyttsx3.", exc)
+        try:
+            _pyttsx3_speak(text)
+        except Exception as exc2:  # noqa: BLE001
+            logger.error("TTS fallback also failed: %s", exc2)
+            print(f"\n[Nado]: {text}\n")
 
 
 # ---------------------------------------------------------------------------

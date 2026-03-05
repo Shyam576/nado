@@ -69,6 +69,50 @@ _MACOS_APP_MAP: dict[str, str] = {
     "activity monitor": "Activity Monitor",
     "system preferences": "System Preferences",
     "system settings": "System Settings",
+    "camera": "Camera",
+    "photo booth": "Photo Booth",
+    "maps": "Maps",
+    "reminders": "Reminders",
+    "contacts": "Contacts",
+    "preview": "Preview",
+    "quicktime": "QuickTime Player",
+    "quicktime player": "QuickTime Player",
+    "textedit": "TextEdit",
+    "text edit": "TextEdit",
+    "pages": "Pages",
+    "numbers": "Numbers",
+    "keynote": "Keynote",
+    "iterm": "iTerm",
+    "iterm2": "iTerm2",
+    "xcode": "Xcode",
+    "simulator": "Simulator",
+    "stickies": "Stickies",
+    "clock": "Clock",
+    "home": "Home",
+    "news": "News",
+    "stocks": "Stocks",
+    "weather": "Weather",
+    "shortcuts": "Shortcuts",
+    "arc": "Arc",
+    "brave": "Brave Browser",
+    "opera": "Opera",
+    "telegram": "Telegram",
+    "signal": "Signal",
+    "skype": "Skype",
+    "teams": "Microsoft Teams",
+    "microsoft teams": "Microsoft Teams",
+    "onenote": "Microsoft OneNote",
+    "one note": "Microsoft OneNote",
+    "outlook": "Microsoft Outlook",
+    "figma": "Figma",
+    "sublime": "Sublime Text",
+    "sublime text": "Sublime Text",
+    "pycharm": "PyCharm",
+    "webstorm": "WebStorm",
+    "intellij": "IntelliJ IDEA",
+    "cursor": "Cursor",
+    "warp": "Warp",
+    "hyper": "Hyper",
 }
 
 _WINDOWS_APP_MAP: dict[str, str] = {
@@ -195,6 +239,9 @@ def open_url(url: str) -> str:
 def take_screenshot() -> str:
     """Capture the screen and save it to the desktop with a timestamp.
 
+    Uses macOS built-in `screencapture` on macOS (handles permissions correctly),
+    falls back to pyautogui on other platforms.
+
     Returns:
         The absolute path of the saved screenshot as a string.
     """
@@ -206,8 +253,17 @@ def take_screenshot() -> str:
     desktop.mkdir(parents=True, exist_ok=True)
     save_path = desktop / filename
 
-    screenshot = pyautogui.screenshot()
-    screenshot.save(save_path)
+    if sys.platform == "darwin":
+        result = subprocess.run(
+            ["screencapture", "-x", str(save_path)],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"screencapture failed: {result.stderr.strip()}")
+    else:
+        screenshot = pyautogui.screenshot()
+        screenshot.save(save_path)
+
     logger.info("Screenshot saved to %s", save_path)
     return str(save_path)
 

@@ -86,7 +86,7 @@ def voice_mode() -> None:
     _check_config_or_warn()
     calibrate_microphone()
 
-    speak("Nado online. I'm listening.")
+    speak("Kuzu zangpo nah-doh. I'm listening.")
     print("\n[Voice mode] Speak anytime — Ctrl-C to exit\n")
 
     try:
@@ -114,7 +114,7 @@ def text_mode() -> None:
 
     from brain import clear_history
 
-    speak("Nado online. How can I help?")
+    speak("kuzu zangpo nah-doh. How can I help?")
     print("\n[Text mode] Type your message and press Enter. ('quit' to exit)\n")
 
     while True:
