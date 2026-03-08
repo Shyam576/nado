@@ -43,6 +43,51 @@ _STATES = {
     "idle":         ("💤", "dim white",     "IDLE"),
 }
 
+# ---------------------------------------------------------------------------
+# ASCII avatar
+# ---------------------------------------------------------------------------
+
+_AW = 11  # all art lines padded to this width
+
+
+def _pad_av(lines: list) -> list:
+    return [ln.ljust(_AW)[:_AW] for ln in lines]
+
+
+_ABODY = _pad_av(["   ─┼─   ", "  ╱ │ ╲  ", " ╱  │  ╲ "])
+
+
+def _ahead(eye: str, mth: str) -> list:
+    return _pad_av([" ┌──────┐", eye, mth, " └──────┘"]) + _ABODY
+
+
+# eye variants
+_AV_EYE_OPEN  = " │ o  o │"
+_AV_EYE_WIDE  = " │ O  O │"
+_AV_EYE_BLINK = " │ ─  ─ │"
+_AV_EYE_UP    = " │ ^  ^ │"
+
+# mouth variants
+_AV_MTH_FLAT  = " │  ──  │"
+_AV_MTH_SM    = " │  ()  │"
+_AV_MTH_OPEN  = " │  (o) │"
+_AV_MTH_BIG   = " │  (O) │"
+_AV_MTH_D     = [" │  .   │", " │  ..  │", " │  ... │", " │  ..  │"]
+
+
+def _av_frame(state: str, tick: int) -> list:
+    """Return 7 lines of padded ASCII art for the current state."""
+    if state == "speaking":
+        cycle = [_AV_MTH_FLAT, _AV_MTH_SM, _AV_MTH_OPEN,
+                 _AV_MTH_BIG, _AV_MTH_OPEN, _AV_MTH_SM]
+        return _ahead(_AV_EYE_OPEN, cycle[(tick // 2) % len(cycle)])
+    if state in ("thinking", "transcribing"):
+        return _ahead(_AV_EYE_UP, _AV_MTH_D[(tick // 6) % len(_AV_MTH_D)])
+    if state == "recording":
+        return _ahead(_AV_EYE_WIDE, _AV_MTH_FLAT)
+    blink = (tick % 40) >= 38
+    return _ahead(_AV_EYE_BLINK if blink else _AV_EYE_OPEN, _AV_MTH_FLAT)
+
 
 class _NadoUI:
     def __rich__(self) -> Layout:
@@ -99,6 +144,17 @@ class _NadoUI:
 
         icon, colour, label = _STATES.get(state, ("●", "white", state.upper()))
 
+        # ── Avatar ───────────────────────────────────────────────────────────
+        av_text = Text(justify="center")
+        for ln in _av_frame(state, _tick):
+            av_text.append(ln + "\n", style=colour)
+        avatar = Panel(
+            Align.center(av_text, vertical="middle"),
+            box=box.ROUNDED,
+            border_style=colour,
+            padding=(1, 0),
+        )
+
         if state in ("listening", "recording"):
             filled    = min(int(level / threshold * (_BAR_WIDTH // 2)), _BAR_WIDTH)
             bar_chars = "█" * filled + "░" * (_BAR_WIDTH - filled)
@@ -127,8 +183,12 @@ class _NadoUI:
         layout = Layout()
         layout.split_column(
             Layout(header, name="header", size=6),
-            Layout(chat,   name="chat"),
+            Layout(name="body"),
             Layout(status, name="status", size=4),
+        )
+        layout["body"].split_row(
+            Layout(avatar, name="avatar", size=15),
+            Layout(chat,   name="chat"),
         )
         return layout
 

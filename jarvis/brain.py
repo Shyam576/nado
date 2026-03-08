@@ -64,7 +64,7 @@ def ask(user_input: str) -> str:
         response = client.chat(
             model=OLLAMA_MODEL,
             messages=messages_with_system,
-            options={"num_predict": 512},
+            options={"num_predict": 512, "temperature": 0.85},
         )
         reply: str = response["message"]["content"]
     except ollama.ResponseError as exc:

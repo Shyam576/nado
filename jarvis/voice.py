@@ -45,6 +45,40 @@ from config import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Markdown → plain-text cleaner  (run before TTS so symbols aren't spoken)
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+def _clean_for_speech(text: str) -> str:
+    """Strip markdown and other symbols that TTS would read aloud literally."""
+    # Remove bold/italic markers: **text**, *text*, __text__, _text_
+    text = _re.sub(r'\*{1,3}|_{1,3}', '', text)
+    # Remove inline code and code blocks
+    text = _re.sub(r'```[\s\S]*?```', '', text)
+    text = _re.sub(r'`[^`]*`', '', text)
+    # Remove headings (# Heading)
+    text = _re.sub(r'^#{1,6}\s*', '', text, flags=_re.MULTILINE)
+    # Remove blockquotes
+    text = _re.sub(r'^>\s*', '', text, flags=_re.MULTILINE)
+    # Remove horizontal rules
+    text = _re.sub(r'^[-*_]{3,}\s*$', '', text, flags=_re.MULTILINE)
+    # Convert bullet/numbered list markers to a natural pause
+    text = _re.sub(r'^\s*[-*+]\s+', '', text, flags=_re.MULTILINE)
+    text = _re.sub(r'^\s*\d+[.)]\s+', '', text, flags=_re.MULTILINE)
+    # Remove markdown links — keep the label, drop the URL
+    text = _re.sub(r'\[([^\]]+)\]\([^)]*\)', r'\1', text)
+    # Remove bare URLs
+    text = _re.sub(r'https?://\S+', '', text)
+    # Remove HTML tags
+    text = _re.sub(r'<[^>]+>', '', text)
+    # Collapse multiple blank lines / excess whitespace
+    text = _re.sub(r'\n{3,}', '\n\n', text)
+    text = text.strip()
+    return text
+
+
+# ---------------------------------------------------------------------------
 # Whisper STT model — loaded once at import time
 # ---------------------------------------------------------------------------
 
@@ -149,6 +183,10 @@ def speak(text: str) -> None:
     if not text:
         return
 
+    text = _clean_for_speech(text)
+    if not text:
+        return
+
     logger.debug("Speaking: %.80s…", text)
     ui.set_state("speaking")
 
@@ -207,8 +245,8 @@ def listen(
     CHUNK = 512       # smaller = more responsive bar updates
     RATE = 16_000     # record at Whisper's native rate — no resampling needed
     BAR_WIDTH = 26
-    # Stop after ~1.5 s of silence once speech has started
-    SILENCE_LIMIT = max(1, int(1.5 * RATE / CHUNK))
+    # Stop after ~0.8 s of silence once speech has started
+    SILENCE_LIMIT = max(1, int(0.8 * RATE / CHUNK))
 
     try:
         pa = pyaudio.PyAudio()
@@ -285,6 +323,9 @@ def listen(
             fp16=False,
             initial_prompt=_WHISPER_INITIAL_PROMPT,
             condition_on_previous_text=False,
+            beam_size=1,       # greedy decode — ~2x faster, negligible accuracy loss
+            best_of=1,
+            temperature=0.0,   # no sampling needed with beam_size=1
         )
         text: str = result["text"].strip()
 
