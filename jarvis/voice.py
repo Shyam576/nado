@@ -1,7 +1,7 @@
 """
-voice.py — Speech-to-Text (STT) and Text-to-Speech (TTS) for the Nado assistant.
+voice.py — Speech-to-Text (STT) and Text-to-Speech (TTS) for the Jarvis assistant.
 
-STT : SpeechRecognition + Whisper (local, no API key).
+STT : Whisper (local, offline, no API key) — primary transcription engine.
 TTS : edge-tts (primary) — Microsoft neural voices, free, no API key, human-sounding.
       Falls back to pyttsx3 automatically when offline.
       macOS playback via afplay (built-in), Windows via PowerShell, Linux via mpg123.
@@ -103,10 +103,10 @@ _WHISPER_HALLUCINATIONS = {
     "thank you very much.", "thanks a lot.",
 }
 
-# Primes Whisper to expect conversational Indian-accented English
+# Primes Whisper to expect conversational English commands for a voice assistant
 _WHISPER_INITIAL_PROMPT = (
-    "Transcribe this spoken English conversation accurately. "
-    "The speaker may have an Indian accent."
+    "Transcribe this spoken English accurately. "
+    "The user is giving commands or questions to an AI assistant named Jarvis."
 )
 
 # ---------------------------------------------------------------------------
@@ -360,5 +360,5 @@ def listen(
 
 def play_acknowledgement() -> None:
     """Speak a short acknowledgement when the wake word is detected."""
-    speak("Yes?")
+    speak("Yes, sir?")
 

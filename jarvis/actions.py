@@ -1,17 +1,24 @@
 """
-actions.py — PC / computer control functions for the Nado assistant.
+actions.py — PC / computer control functions for the Jarvis assistant.
 
-Parses <ACTION> tags from Claude's reply, dispatches to the appropriate
+Parses <ACTION> tags from the LLM's reply, dispatches to the appropriate
 handler, and returns a human-readable confirmation string.
 
 Supported action types
 ───────────────────────
-  open_app    → open a named application
-  type_text   → type a string via the keyboard
-  web_search  → open the default browser with a Google search
-  open_url    → open a specific URL
-  screenshot  → capture and save a screenshot
-  run_command → execute an arbitrary shell command
+  open_app          → open a named application
+  type_text         → type a string via the keyboard
+  web_search        → open the default browser with a Google search
+  open_url          → open a specific URL
+  screenshot        → capture and save a screenshot
+  run_command       → execute an arbitrary shell command
+  get_datetime      → return the current date and time
+  get_weather       → fetch current weather for a location (Open-Meteo, no key)
+  show_notification → display a native desktop notification
+  set_reminder      → schedule a spoken/notification reminder after N minutes
+  read_clipboard    → read the system clipboard contents
+  write_clipboard   → write text to the system clipboard
+  play_media        → open a YouTube search in the browser
 """
 
 import json
@@ -19,6 +26,10 @@ import logging
 import re
 import subprocess
 import sys
+import threading
+import time
+import urllib.parse
+import urllib.request
 import webbrowser
 from datetime import datetime
 from pathlib import Path
@@ -291,6 +302,250 @@ def run_command(cmd: str) -> str:
     return truncated
 
 
+def get_datetime() -> str:
+    """Return the current date and time as a friendly string.
+
+    Returns:
+        Human-readable date/time string, e.g. "Tuesday, 10 March 2026 — 14:35".
+    """
+    logger.info("Action: get_datetime")
+    now = datetime.now()
+    return now.strftime("%A, %d %B %Y — %H:%M")
+
+
+def get_weather(location: str) -> str:
+    """Fetch current weather for a location using Open-Meteo (free, no API key).
+
+    Performs two HTTP calls: geocoding (Nominatim) → weather (Open-Meteo).
+
+    Args:
+        location: City name or location string, e.g. "London" or "New York".
+
+    Returns:
+        A short natural-language weather summary, or an error string.
+    """
+    logger.info("Action: get_weather('%s')", location)
+
+    # Step 1 — geocode the location using Open-Meteo's geocoding API
+    try:
+        geo_url = (
+            "https://geocoding-api.open-meteo.com/v1/search?"
+            + urllib.parse.urlencode({"name": location, "count": 1, "language": "en", "format": "json"})
+        )
+        with urllib.request.urlopen(geo_url, timeout=5) as resp:
+            geo_data = json.loads(resp.read().decode())
+
+        results = geo_data.get("results")
+        if not results:
+            return f"I couldn't find a location called '{location}'."
+
+        lat = results[0]["latitude"]
+        lon = results[0]["longitude"]
+        place_name = results[0].get("name", location)
+    except Exception as exc:
+        logger.warning("Geocoding failed: %s", exc)
+        return "I couldn't look up that location right now — no internet perhaps?"
+
+    # Step 2 — fetch current weather
+    try:
+        wx_url = (
+            "https://api.open-meteo.com/v1/forecast?"
+            + urllib.parse.urlencode({
+                "latitude": lat,
+                "longitude": lon,
+                "current": "temperature_2m,apparent_temperature,weather_code,wind_speed_10m",
+                "wind_speed_unit": "kmh",
+                "temperature_unit": "celsius",
+                "timezone": "auto",
+            })
+        )
+        with urllib.request.urlopen(wx_url, timeout=5) as resp:
+            wx_data = json.loads(resp.read().decode())
+
+        current = wx_data.get("current", {})
+        temp = current.get("temperature_2m", "?")
+        feels = current.get("apparent_temperature", "?")
+        wind = current.get("wind_speed_10m", "?")
+        code = current.get("weather_code", 0)
+    except Exception as exc:
+        logger.warning("Weather fetch failed: %s", exc)
+        return "I fetched the coordinates but couldn't pull the weather data. The API may be unreachable."
+
+    condition = _weather_code_to_text(code)
+    return (
+        f"{place_name}: {condition}, {temp}°C (feels like {feels}°C), "
+        f"wind {wind} km/h."
+    )
+
+
+# WMO Weather Code → description mapping (subset of common codes)
+_WMO_CODES: dict[int, str] = {
+    0: "clear sky", 1: "mainly clear", 2: "partly cloudy", 3: "overcast",
+    45: "fog", 48: "icy fog",
+    51: "light drizzle", 53: "moderate drizzle", 55: "dense drizzle",
+    61: "light rain", 63: "moderate rain", 65: "heavy rain",
+    71: "light snow", 73: "moderate snow", 75: "heavy snow", 77: "snow grains",
+    80: "light showers", 81: "moderate showers", 82: "heavy showers",
+    85: "light snow showers", 86: "heavy snow showers",
+    95: "thunderstorm", 96: "thunderstorm with hail", 99: "severe thunderstorm",
+}
+
+
+def _weather_code_to_text(code: int) -> str:
+    return _WMO_CODES.get(code, f"conditions (code {code})")
+
+
+def show_notification(title: str, message: str) -> str:
+    """Display a native desktop notification.
+
+    Uses osascript on macOS, libnotify on Linux, and a PowerShell toast on Windows.
+
+    Args:
+        title:   Notification title.
+        message: Notification body text.
+
+    Returns:
+        Confirmation string.
+    """
+    logger.info("Action: show_notification('%s')", title)
+    try:
+        if sys.platform == "darwin":
+            script = f'display notification "{message}" with title "{title}"'
+            subprocess.run(["osascript", "-e", script], check=True, capture_output=True)
+        elif sys.platform == "win32":
+            ps_script = (
+                f'$ToastTitle = "{title}"; $ToastText = "{message}"; '
+                "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, "
+                "ContentType = WindowsRuntime] > $null; "
+                "$Template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent("
+                "[Windows.UI.Notifications.ToastTemplateType]::ToastText02); "
+                "$RawXml = [xml] $Template.GetXml(); "
+                "($RawXml.toast.visual.binding.text | Where-Object {$_.id -eq '1'}).AppendChild("
+                "$RawXml.CreateTextNode($ToastTitle)) > $null; "
+                "($RawXml.toast.visual.binding.text | Where-Object {$_.id -eq '2'}).AppendChild("
+                "$RawXml.CreateTextNode($ToastText)) > $null; "
+                "$SerializedXml = New-Object Windows.Data.Xml.Dom.XmlDocument; "
+                "$SerializedXml.LoadXml($RawXml.GetXml()); "
+                "$Toast = [Windows.UI.Notifications.ToastNotification]::new($SerializedXml); "
+                "$Toast.Tag = 'Jarvis'; $Toast.Group = 'Jarvis'; "
+                "$Notifier = [Windows.UI.Notifications.ToastNotificationManager]::"
+                "CreateToastNotifier('Jarvis'); $Notifier.Show($Toast);"
+            )
+            subprocess.run(["powershell", "-Command", ps_script], check=True, capture_output=True)
+        else:
+            subprocess.run(["notify-send", title, message], check=True, capture_output=True)
+    except Exception as exc:
+        logger.warning("Notification failed: %s", exc)
+        return f"Notification could not be shown: {exc}"
+    return f"Notification shown: {title} — {message}"
+
+
+def set_reminder(message: str, minutes: int) -> str:
+    """Schedule a reminder to fire after a given number of minutes.
+
+    Uses a daemon thread with a sleep so the main loop isn't blocked.
+    On expiry, plays a desktop notification and calls speak() if available.
+
+    Args:
+        message: The reminder text to deliver.
+        minutes: Delay in minutes (clamped to 1–1440).
+
+    Returns:
+        An acknowledgement string confirming the reminder was set.
+    """
+    minutes = max(1, min(int(minutes), 1440))  # sanity clamp: 1 min – 24 h
+    logger.info("Action: set_reminder('%s', %d min)", message, minutes)
+    delay_seconds = minutes * 60
+
+    def _fire() -> None:
+        time.sleep(delay_seconds)
+        show_notification("Jarvis Reminder", message)
+        try:
+            from voice import speak
+            speak(f"Reminder: {message}")
+        except Exception:  # noqa: BLE001
+            pass
+
+    t = threading.Thread(target=_fire, daemon=True, name=f"reminder-{minutes}min")
+    t.start()
+    return f"Reminder set: '{message}' in {minutes} minute{'s' if minutes != 1 else ''}."
+
+
+def read_clipboard() -> str:
+    """Read and return the current system clipboard contents.
+
+    Returns:
+        Clipboard text, or an empty string if the clipboard is empty or inaccessible.
+    """
+    logger.info("Action: read_clipboard")
+    try:
+        if sys.platform == "darwin":
+            result = subprocess.run(["pbpaste"], capture_output=True, text=True)
+            return result.stdout or "(clipboard is empty)"
+        elif sys.platform == "win32":
+            result = subprocess.run(
+                ["powershell", "-command", "Get-Clipboard"],
+                capture_output=True, text=True,
+            )
+            return result.stdout.strip() or "(clipboard is empty)"
+        else:
+            result = subprocess.run(["xclip", "-selection", "clipboard", "-o"],
+                                    capture_output=True, text=True)
+            return result.stdout or "(clipboard is empty)"
+    except Exception as exc:
+        logger.warning("read_clipboard failed: %s", exc)
+        return "I couldn't read the clipboard."
+
+
+def write_clipboard(text: str) -> str:
+    """Write text to the system clipboard.
+
+    Args:
+        text: The string to copy to the clipboard.
+
+    Returns:
+        Confirmation string.
+    """
+    logger.info("Action: write_clipboard (length=%d)", len(text))
+    try:
+        if sys.platform == "darwin":
+            proc = subprocess.run(["pbcopy"], input=text, text=True, capture_output=True)
+            if proc.returncode != 0:
+                raise RuntimeError(proc.stderr)
+        elif sys.platform == "win32":
+            subprocess.run(
+                ["powershell", "-command", f'Set-Clipboard -Value "{text}"'],
+                capture_output=True, text=True, check=True,
+            )
+        else:
+            proc = subprocess.run(
+                ["xclip", "-selection", "clipboard"],
+                input=text, text=True, capture_output=True,
+            )
+            if proc.returncode != 0:
+                raise RuntimeError(proc.stderr)
+    except Exception as exc:
+        logger.warning("write_clipboard failed: %s", exc)
+        return "I couldn't write to the clipboard."
+    label = text[:40] + ("…" if len(text) > 40 else "")
+    return f"Copied to clipboard: {label}"
+
+
+def play_media(query: str) -> str:
+    """Open a YouTube search for the given query in the default browser.
+
+    Args:
+        query: What to search for on YouTube (e.g. "lo-fi music").
+
+    Returns:
+        Confirmation string.
+    """
+    logger.info("Action: play_media('%s')", query)
+    url = "https://www.youtube.com/results?search_query=" + urllib.parse.quote_plus(query)
+    webbrowser.open(url)
+    return f"Opened YouTube search for: {query}"
+
+
 # ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
@@ -341,11 +596,31 @@ def parse_and_execute(reply: str) -> tuple[Optional[str], str]:
         elif action_type == "run_command":
             output = run_command(action.get("cmd", ""))
             result = f"Command output: {output}"
+        elif action_type == "get_datetime":
+            result = get_datetime()
+        elif action_type == "get_weather":
+            result = get_weather(action.get("location", "your location"))
+        elif action_type == "show_notification":
+            result = show_notification(
+                action.get("title", "Jarvis"),
+                action.get("message", ""),
+            )
+        elif action_type == "set_reminder":
+            result = set_reminder(
+                action.get("message", "Reminder"),
+                action.get("minutes", 5),
+            )
+        elif action_type == "read_clipboard":
+            result = read_clipboard()
+        elif action_type == "write_clipboard":
+            result = write_clipboard(action.get("text", ""))
+        elif action_type == "play_media":
+            result = play_media(action.get("query", ""))
         else:
             logger.warning("Unknown action type: '%s'", action_type)
             result = None
     except Exception as exc:  # noqa: BLE001
         logger.exception("Action '%s' failed: %s", action_type, exc)
-        return None, "I couldn't do that, sorry."
+        return None, "I'm afraid I couldn't complete that action."
 
     return result, clean_reply

@@ -2,7 +2,9 @@
 brain.py — Ollama LLM wrapper with rolling conversation memory.
 
 Maintains the last MAX_HISTORY turns of the conversation and sends them with
-every request, giving Nado context-awareness across a session.
+every request, giving Jarvis context-awareness across a session.  Persistent
+user preferences and facts are loaded from memory.py and injected into every
+system prompt.
 
 Requires Ollama running locally:  https://ollama.com
   1. Install Ollama
@@ -15,6 +17,7 @@ from typing import Optional
 
 import ollama
 
+import memory
 from config import (
     OLLAMA_BASE_URL,
     OLLAMA_MODEL,
@@ -53,9 +56,15 @@ def ask(user_input: str) -> str:
 
     _history.append({"role": "user", "content": user_input})
 
+    # Build system prompt — append persistent memory context if available
+    mem_context = memory.get_context_summary()
+    effective_system = SYSTEM_PROMPT
+    if mem_context:
+        effective_system = SYSTEM_PROMPT + "\n\n" + mem_context
+
     # Prepend the system prompt as a system-role message
     messages_with_system: list[dict[str, str]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": effective_system},
         *_history,
     ]
 
@@ -75,7 +84,7 @@ def ask(user_input: str) -> str:
                 f"Run: ollama pull {OLLAMA_MODEL}"
             )
         else:
-            reply = "I received an unexpected response from my local brain."
+            reply = "I received an unexpected response from my local brain. Most peculiar."
     except ConnectionRefusedError:
         logger.error("Cannot connect to Ollama at %s", OLLAMA_BASE_URL)
         reply = (
@@ -84,7 +93,7 @@ def ask(user_input: str) -> str:
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Unexpected error calling Ollama: %s", exc)
-        reply = "Something went wrong on my end. Please try again."
+        reply = "Something went wrong on my end. Do give me a moment and try again."
 
     _history.append({"role": "assistant", "content": reply})
 

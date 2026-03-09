@@ -1,7 +1,7 @@
 """
-ui.py - Full-screen terminal TUI for Nado voice mode.
+ui.py - Full-screen terminal TUI for Jarvis voice mode.
 
-Uses Rich Live display with a self-rendering class (_NadoUI.__rich__) so
+Uses Rich Live display with a self-rendering class (_JarvisUI.__rich__) so
 that auto_refresh=True re-renders the layout on every tick with zero manual
 threading. All public functions are safe no-ops when the UI is not running.
 """
@@ -89,7 +89,7 @@ def _av_frame(state: str, tick: int) -> list:
     return _ahead(_AV_EYE_BLINK if blink else _AV_EYE_OPEN, _AV_MTH_FLAT)
 
 
-class _NadoUI:
+class _JarvisUI:
     def __rich__(self) -> Layout:
         global _tick
         _tick = (_tick + 1) % len(_SPINNER)
@@ -104,7 +104,7 @@ class _NadoUI:
         header = Panel(
             Align.center(
                 Text.assemble(
-                    ("\n  N · A · D · O  \n", "bold cyan"),
+                    ("\n  J · A · R · V · I · S  \n", "bold cyan"),
                     ("  Your AI Assistant  ",                "dim white"),
                 )
             ),
@@ -126,10 +126,10 @@ class _NadoUI:
                 if i:
                     body.append("\n\n")
                 if role == "user":
-                    body.append("  You  ›  ", style="bold bright_white")
+                    body.append("  You    ›  ", style="bold bright_white")
                     body.append(text,          style="white")
                 else:
-                    body.append("  Nado ›  ", style="bold cyan")
+                    body.append("  Jarvis ›  ", style="bold cyan")
                     body.append(text,          style="bright_cyan")
         else:
             body.append("\n  Say something to get started…", style="dim italic")
@@ -193,7 +193,7 @@ class _NadoUI:
         return layout
 
 
-_ui_renderable = _NadoUI()
+_ui_renderable = _JarvisUI()
 
 
 def is_active() -> bool:
@@ -232,6 +232,17 @@ def add_nado(text: str) -> None:
         _messages.append(("nado", text))
 
 
+def add_jarvis(text: str) -> None:
+    if not _active:
+        return
+    with _lock:
+        _messages.append(("jarvis", text))
+
+
+# Keep legacy alias so old call-sites still work
+add_nado = add_jarvis
+
+
 def start() -> None:
     global _active, _live, _original_log_handlers
 
@@ -239,7 +250,7 @@ def start() -> None:
     _original_log_handlers = root.handlers[:]
     for h in root.handlers[:]:
         root.removeHandler(h)
-    fh = logging.FileHandler("/tmp/nado.log", mode="a")
+    fh = logging.FileHandler("/tmp/jarvis.log", mode="a")
     fh.setFormatter(logging.Formatter(
         "%(asctime)s  %(levelname)-8s  %(name)s -- %(message)s",
         datefmt="%H:%M:%S",

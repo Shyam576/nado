@@ -1,4 +1,4 @@
-# Nado / JARVIS — Python dependencies (100 % free, no API keys)
+# Jarvis AI Assistant — Python dependencies (100 % free, no API keys)
 # Install with: python3 -m pip install -r requirements.txt
 #
 # Before installing, handle the OS-specific PyAudio requirement:
@@ -35,3 +35,6 @@ pyscreeze>=0.1.28      # required by pyautogui for screenshots
 
 # Audio I/O (required by SpeechRecognition for microphone access)
 pyaudio>=0.2.14
+
+# numpy — audio processing (required by Whisper and the listen() level bar)
+numpy>=1.24.0

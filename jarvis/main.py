@@ -1,25 +1,25 @@
 """
-main.py — Entry point for the Nado / JARVIS personal AI assistant.
+main.py — Entry point for the Jarvis AI assistant.
 
 Usage
 ─────
-  python main.py          # full voice mode — wake word loop
+  python main.py          # full voice mode — always-on listening
   python main.py text     # keyboard input mode (for testing without a mic)
 
 100 % free stack — no API keys required:
   LLM  : Ollama (local)           https://ollama.com
-  TTS  : pyttsx3 (offline)
-  STT  : SpeechRecognition + Google Web Speech (free)
-  Wake : speech-based keyword detection
+  TTS  : edge-tts (neural) / pyttsx3 (offline fallback)
+  STT  : Whisper (offline) + SpeechRecognition
+  Mem  : local JSON (jarvis_memory.json)
 
 Voice pipeline:
-  1. Listen for a short snippet of speech.
-  2. Check if the transcription starts with (or contains) the wake word "nado".
-  3. On match → play acknowledgement, then capture the full command.
-  4. Send command to brain.py (Ollama).
-  5. Parse any <ACTION> tags, execute them.
-  6. Speak the cleaned reply via pyttsx3.
-  7. Return to step 1.
+  1. Load persistent memory from disk.
+  2. Listen continuously for speech.
+  3. Transcribe via Whisper.
+  4. Send text + conversation history + system prompt → Ollama LLM.
+  5. Parse any <ACTION> tags and execute them.
+  6. Speak the cleaned reply via edge-tts / pyttsx3.
+  7. Return to step 2.
 """
 
 import logging
@@ -30,6 +30,7 @@ from typing import Optional
 from actions import parse_and_execute
 from brain import ask
 from config import validate_config
+import memory
 import ui
 from voice import listen, speak, calibrate_microphone, _stop_event
 
@@ -68,14 +69,14 @@ def process_input(user_text: str) -> None:
         logger.info("Action result: %s", action_result)
 
     if clean_reply:
-        ui.add_nado(clean_reply)
+        ui.add_jarvis(clean_reply)
         if not ui.is_active():
-            print(f"\n[Nado]: {clean_reply}\n")
+            print(f"\n[Jarvis]: {clean_reply}\n")
         speak(clean_reply)
     elif action_result:
-        ui.add_nado("Done.")
+        ui.add_jarvis("Done.")
         if not ui.is_active():
-            print("\n[Nado]: Done.\n")
+            print("\n[Jarvis]: Done.\n")
         speak("Done.")
 
 
@@ -98,7 +99,7 @@ def voice_mode() -> None:
     ui.set_state("starting")
     calibrate_microphone()
 
-    speak("Kuzu zangpo nah-doh. I'm listening.")
+    speak("Jarvis online. Ready when you are.")
 
     def _sigint_handler(signum, frame):
         """Set the stop flag so the listen loop exits at its next iteration."""
@@ -133,7 +134,7 @@ def text_mode() -> None:
 
     from brain import clear_history
 
-    speak("kuzu zangpo nah-doh. How can I help?")
+    speak("Jarvis online. How may I assist you?")
     print("\n[Text mode] Type your message and press Enter. ('quit' to exit)\n")
 
     while True:
@@ -177,7 +178,9 @@ def _check_config_or_warn() -> None:
 
 
 def main() -> None:
-    """Parse CLI arguments and launch the appropriate mode."""
+    """Parse CLI arguments, load persistent memory, and launch the appropriate mode."""
+    memory.load()
+
     mode = sys.argv[1].lower() if len(sys.argv) > 1 else "voice"
 
     if mode == "text":
