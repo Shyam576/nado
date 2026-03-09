@@ -23,6 +23,7 @@ Voice pipeline:
 """
 
 import logging
+import signal
 import sys
 from typing import Optional
 
@@ -30,7 +31,7 @@ from actions import parse_and_execute
 from brain import ask
 from config import validate_config
 import ui
-from voice import listen, speak, calibrate_microphone
+from voice import listen, speak, calibrate_microphone, _stop_event
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -91,22 +92,30 @@ def voice_mode() -> None:
     """
     _check_config_or_warn()
 
+    _stop_event.clear()  # ensure clean state on (re-)entry
+
     ui.start()
     ui.set_state("starting")
     calibrate_microphone()
 
     speak("Kuzu zangpo nah-doh. I'm listening.")
 
+    def _sigint_handler(signum, frame):
+        """Set the stop flag so the listen loop exits at its next iteration."""
+        _stop_event.set()
+
+    _prev_handler = signal.signal(signal.SIGINT, _sigint_handler)
     try:
-        while True:
+        while not _stop_event.is_set():
             command = listen()
-            if command:
+            if command and not _stop_event.is_set():
                 ui.add_user(command)
                 process_input(command)
-    except KeyboardInterrupt:
+    finally:
+        signal.signal(signal.SIGINT, _prev_handler)
+        _stop_event.clear()
         logger.info("Shutdown requested.")
         speak("Shutting down. Goodbye.")
-    finally:
         ui.stop()
 
 

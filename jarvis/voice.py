@@ -13,6 +13,7 @@ import asyncio
 import io
 import logging
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -43,6 +44,12 @@ from config import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Graceful-stop flag — set from voice_mode() SIGINT handler to break listen()
+# ---------------------------------------------------------------------------
+
+_stop_event = threading.Event()
 
 # ---------------------------------------------------------------------------
 # Markdown → plain-text cleaner  (run before TTS so symbols aren't spoken)
@@ -268,7 +275,7 @@ def listen(
     start_time = time.monotonic()
 
     try:
-        while True:
+        while not _stop_event.is_set():
             data = stream.read(CHUNK, exception_on_overflow=False)
             samples = np.frombuffer(data, dtype=np.int16).astype(np.float32)
             rms = float(np.sqrt(np.mean(samples ** 2)))
@@ -304,9 +311,19 @@ def listen(
     finally:
         if not ui.is_active():
             print("\r" + " " * 55 + "\r", end="", flush=True)
-        stream.stop_stream()
-        stream.close()
-        pa.terminate()
+        try:
+            stream.stop_stream()
+        except Exception:
+            pass
+        try:
+            stream.close()
+        except Exception:
+            pass
+        # pa.terminate() can hang indefinitely on macOS CoreAudio — run it in
+        # a daemon thread so it can never block the main thread forever.
+        _term_thread = threading.Thread(target=pa.terminate, daemon=True)
+        _term_thread.start()
+        _term_thread.join(timeout=2.0)
 
     if not frames or speech_chunk_count < 2:
         logger.debug("Listen timed out — no speech detected.")
