@@ -180,6 +180,24 @@ TTS_VOICE: str | None = "com.apple.voice.compact.en-GB.Daniel"
 
 
 # ---------------------------------------------------------------------------
+# Proactive brain settings
+# ---------------------------------------------------------------------------
+
+# Master switch — set to False to disable all proactive behaviour
+PROACTIVE_ENABLED: bool = True
+
+# Speak up after N minutes of silence (set to 0 to disable)
+PROACTIVE_IDLE_MINUTES: int = 10
+
+# Deliver a morning greeting at a specific hour each day (set to False to disable)
+PROACTIVE_MORNING_BRIEFING: bool = True
+PROACTIVE_MORNING_HOUR: int = 8  # 24-hour clock (8 = 8 AM)
+
+# How often the proactive background loop ticks, in seconds
+PROACTIVE_POLL_SECONDS: int = 30
+
+
+# ---------------------------------------------------------------------------
 # Validation helper
 # ---------------------------------------------------------------------------
 

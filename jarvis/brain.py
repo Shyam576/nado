@@ -79,6 +79,7 @@ def ask(user_input: str) -> str:
                 "top_p": 0.92,            # nucleus sampling — keeps quality while allowing variety
                 "repeat_penalty": 1.15,   # discourages repetitive phrasing
                 "top_k": 50,              # limits the token pool to the 50 most likely
+                "num_gpu": 0,             # force CPU-only; avoids Metal init crash on macOS
             },
         )
         reply: str = response["message"]["content"]

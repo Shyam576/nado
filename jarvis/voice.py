@@ -30,7 +30,6 @@ import numpy as np
 import pyttsx3
 import speech_recognition as sr
 import whisper
-from scipy.signal import resample_poly
 
 import ui
 from config import (

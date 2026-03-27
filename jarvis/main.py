@@ -31,6 +31,7 @@ from actions import parse_and_execute
 from brain import ask
 from config import validate_config
 import memory
+import proactive
 import ui
 from voice import listen, speak, calibrate_microphone, _stop_event
 
@@ -101,6 +102,8 @@ def voice_mode() -> None:
 
     speak("Jarvis online. Ready when you are.")
 
+    proactive.start(_stop_event)
+
     def _sigint_handler(signum, frame):
         """Set the stop flag so the listen loop exits at its next iteration."""
         _stop_event.set()
@@ -110,6 +113,7 @@ def voice_mode() -> None:
         while not _stop_event.is_set():
             command = listen()
             if command and not _stop_event.is_set():
+                proactive.record_interaction()
                 ui.add_user(command)
                 process_input(command)
     finally:
