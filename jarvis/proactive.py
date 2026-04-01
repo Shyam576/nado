@@ -2,14 +2,14 @@
 proactive.py — Proactive brain for the Jarvis assistant.
 
 Runs a background daemon thread that monitors time and user-idle state, then
-initiates conversation unprompted via a one-shot Ollama call.
+initiates conversation unprompted via a one-shot LLM call.
 
 Triggers (all configurable in config.py):
   • Morning briefing  — spoken once per day at PROACTIVE_MORNING_HOUR.
   • Idle check-in     — spoken after PROACTIVE_IDLE_MINUTES of silence.
 
 Design notes:
-  - Uses a separate Ollama call so no fake "user" turn pollutes chat history.
+  - Uses a separate LLM call so no fake "user" turn pollutes chat history.
   - The proactive reply is injected into brain history as an assistant message
     so future responses are aware of what Jarvis already said.
   - All triggers are skipped while Jarvis is already speaking / thinking.
@@ -22,14 +22,10 @@ import threading
 import time
 from typing import Optional
 
-import ollama
-
 import brain
 import memory
 import ui
 from config import (
-    OLLAMA_BASE_URL,
-    OLLAMA_MODEL,
     PROACTIVE_ENABLED,
     PROACTIVE_IDLE_MINUTES,
     PROACTIVE_MORNING_BRIEFING,
@@ -102,9 +98,10 @@ def _is_busy() -> bool:
 
 
 def _ollama_call(prompt: str) -> Optional[str]:
-    """Fire a lightweight one-shot Ollama chat call for proactive messages.
+    """Fire a lightweight one-shot LLM call for proactive messages.
 
-    Does NOT touch the main conversation history in brain.py.
+    Reuses the Llama singleton from brain.py so the model is not loaded twice.
+    Does NOT touch the main conversation history.
 
     Args:
         prompt: The synthesised instruction for what to say.
@@ -118,23 +115,19 @@ def _ollama_call(prompt: str) -> Optional[str]:
         system = system + "\n\n" + mem_context
 
     try:
-        client = ollama.Client(host=OLLAMA_BASE_URL)
-        response = client.chat(
-            model=OLLAMA_MODEL,
+        llm = brain._get_llm()
+        response = llm.create_chat_completion(
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user",   "content": prompt},
             ],
-            options={
-                "num_predict": 120,
-                "temperature": 1.0,
-                "top_p": 0.9,
-                "num_gpu": 0,
-            },
+            max_tokens=120,
+            temperature=1.0,
+            top_p=0.9,
         )
-        return response["message"]["content"].strip()
+        return response["choices"][0]["message"]["content"].strip()
     except Exception as exc:  # noqa: BLE001
-        logger.error("Proactive Ollama call failed: %s", exc)
+        logger.error("Proactive LLM call failed: %s", exc)
         return None
 
 

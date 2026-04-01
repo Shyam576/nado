@@ -1,31 +1,88 @@
 """
-brain.py — Ollama LLM wrapper with rolling conversation memory.
+brain.py — LLM wrapper with rolling conversation memory.
 
-Maintains the last MAX_HISTORY turns of the conversation and sends them with
-every request, giving Jarvis context-awareness across a session.  Persistent
-user preferences and facts are loaded from memory.py and injected into every
-system prompt.
+Uses llama-cpp-python (CPU-only) to run the model directly from the GGUF file
+stored in ~/.ollama/models/blobs/ — no Ollama server process required.
 
-Requires Ollama running locally:  https://ollama.com
-  1. Install Ollama
-  2. ollama pull llama3.2
-  3. ollama serve          (or it auto-starts on macOS after install)
+This bypasses the Ollama llamarunner which crashes on macOS 26 due to a Metal
+framework incompatibility in MetalPerformancePrimitives.framework.
 """
 
 import logging
+import os
+from pathlib import Path
 from typing import Optional
-
-import ollama
 
 import memory
 from config import (
-    OLLAMA_BASE_URL,
     OLLAMA_MODEL,
     MAX_HISTORY,
     SYSTEM_PROMPT,
 )
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# GGUF model path — resolve from Ollama's local blob store
+# ---------------------------------------------------------------------------
+
+def _find_gguf() -> str:
+    """Return the path to the llama3.2 GGUF blob in ~/.ollama/models/blobs/."""
+    import json
+
+    manifests_root = Path.home() / ".ollama" / "models" / "manifests"
+    blobs_root = Path.home() / ".ollama" / "models" / "blobs"
+
+    # Walk manifests to find a model whose name matches OLLAMA_MODEL
+    model_name = OLLAMA_MODEL.split(":")[0].lower()
+    for manifest_path in manifests_root.rglob("*"):
+        if not manifest_path.is_file():
+            continue
+        if model_name not in str(manifest_path).lower():
+            continue
+        try:
+            data = json.loads(manifest_path.read_text())
+            for layer in data.get("layers", []):
+                if "model" in layer.get("mediaType", ""):
+                    digest = layer["digest"].replace(":", "-")
+                    candidate = blobs_root / digest
+                    if candidate.exists():
+                        return str(candidate)
+        except Exception:  # noqa: BLE001
+            pass
+
+    raise FileNotFoundError(
+        f"Cannot find GGUF blob for model '{OLLAMA_MODEL}'. "
+        f"Make sure you have run: ollama pull {OLLAMA_MODEL}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Lazy-loaded Llama singleton
+# ---------------------------------------------------------------------------
+
+_llm = None
+
+
+def _get_llm():
+    """Return the loaded Llama instance, initialising it on first call."""
+    global _llm
+    if _llm is not None:
+        return _llm
+
+    from llama_cpp import Llama
+
+    model_path = _find_gguf()
+    logger.info("Loading model from %s …", model_path)
+    _llm = Llama(
+        model_path=model_path,
+        n_gpu_layers=0,       # CPU-only — avoids Metal crash on macOS 26
+        n_ctx=4096,           # context window
+        verbose=False,
+    )
+    logger.info("Model loaded.")
+    return _llm
+
 
 # ---------------------------------------------------------------------------
 # Module-level conversation history (the only intentional mutable global)
@@ -40,7 +97,7 @@ _history: list[dict[str, str]] = []
 
 
 def ask(user_input: str) -> str:
-    """Send a user message to Ollama and return its text reply.
+    """Send a user message to the LLM and return its text reply.
 
     Conversation history is automatically maintained.  The oldest turns are
     pruned once the history exceeds MAX_HISTORY * 2 message objects (each
@@ -62,44 +119,24 @@ def ask(user_input: str) -> str:
     if mem_context:
         effective_system = SYSTEM_PROMPT + "\n\n" + mem_context
 
-    # Prepend the system prompt as a system-role message
     messages_with_system: list[dict[str, str]] = [
         {"role": "system", "content": effective_system},
         *_history,
     ]
 
     try:
-        client = ollama.Client(host=OLLAMA_BASE_URL)
-        response = client.chat(
-            model=OLLAMA_MODEL,
+        llm = _get_llm()
+        response = llm.create_chat_completion(
             messages=messages_with_system,
-            options={
-                "num_predict": 768,
-                "temperature": 1.1,       # higher = more creative / surprising
-                "top_p": 0.92,            # nucleus sampling — keeps quality while allowing variety
-                "repeat_penalty": 1.15,   # discourages repetitive phrasing
-                "top_k": 50,              # limits the token pool to the 50 most likely
-                "num_gpu": 0,             # force CPU-only; avoids Metal init crash on macOS
-            },
+            max_tokens=768,
+            temperature=1.1,
+            top_p=0.92,
+            repeat_penalty=1.15,
+            top_k=50,
         )
-        reply: str = response["message"]["content"]
-    except ollama.ResponseError as exc:
-        logger.error("Ollama response error: %s", exc)
-        if "model" in str(exc).lower():
-            reply = (
-                f"I can't find the model '{OLLAMA_MODEL}'. "
-                f"Run: ollama pull {OLLAMA_MODEL}"
-            )
-        else:
-            reply = "I received an unexpected response from my local brain. Most peculiar."
-    except ConnectionRefusedError:
-        logger.error("Cannot connect to Ollama at %s", OLLAMA_BASE_URL)
-        reply = (
-            "I can't reach my local brain. "
-            "Is Ollama running? Try: ollama serve"
-        )
+        reply: str = response["choices"][0]["message"]["content"]
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Unexpected error calling Ollama: %s", exc)
+        logger.exception("LLM call failed: %s", exc)
         reply = "Something went wrong on my end. Do give me a moment and try again."
 
     _history.append({"role": "assistant", "content": reply})
