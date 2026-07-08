@@ -5,6 +5,7 @@ Usage
 ─────
   python main.py          # full voice mode — always-on listening
   python main.py text     # keyboard input mode (for testing without a mic)
+  python main.py bot      # Telegram bot mode (see bot/telegram_bot.py)
 
 100 % free stack — no API keys required:
   LLM  : Ollama (local)           https://ollama.com
@@ -165,6 +166,23 @@ def text_mode() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Telegram bot mode
+# ---------------------------------------------------------------------------
+
+
+def bot_mode() -> None:
+    """Run Jarvis as a Telegram bot (long-polling). Press Ctrl-C to exit."""
+    from config import validate_bot_config
+
+    for warning in validate_bot_config():
+        logger.warning(warning)
+
+    from bot.telegram_bot import run as run_bot
+
+    run_bot()
+
+
+# ---------------------------------------------------------------------------
 # Config validation helper
 # ---------------------------------------------------------------------------
 
@@ -183,7 +201,10 @@ def _check_config_or_warn() -> None:
 
 def main() -> None:
     """Parse CLI arguments, load persistent memory, and launch the appropriate mode."""
+    from store.db import init_db
+
     memory.load()
+    init_db()
 
     mode = sys.argv[1].lower() if len(sys.argv) > 1 else "voice"
 
@@ -191,8 +212,10 @@ def main() -> None:
         text_mode()
     elif mode == "voice":
         voice_mode()
+    elif mode == "bot":
+        bot_mode()
     else:
-        print(f"Unknown mode '{mode}'. Use 'voice' (default) or 'text'.")
+        print(f"Unknown mode '{mode}'. Use 'voice' (default), 'text', or 'bot'.")
         sys.exit(1)
 
 

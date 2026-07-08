@@ -38,3 +38,8 @@ pyaudio>=0.2.14
 
 # numpy — audio processing (required by Whisper and the listen() level bar)
 numpy>=1.24.0
+
+# Telegram bot transport (bot mode — python main.py bot)
+# [job-queue] extra pulls in APScheduler, needed for reminder delivery polling
+python-telegram-bot[job-queue]>=21.0
+python-dotenv>=1.0.0   # loads TELEGRAM_BOT_TOKEN / JARVIS_ALLOWED_CHAT_IDS from .env

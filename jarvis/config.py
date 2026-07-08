@@ -9,17 +9,49 @@ config.py — Central configuration for the Jarvis AI assistant.
   Mem  : local JSON file for persistent memory
 """
 
+import os
 from pathlib import Path
+
+BASE_DIR: Path = Path(__file__).parent.resolve()
+
+# Load variables from .env into the process environment (bot token, chat_id
+# allowlist). Real env vars set by the shell still take precedence over .env.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(BASE_DIR / ".env")
+except ImportError:
+    pass  # python-dotenv not installed — fall back to real env vars only
 
 # ---------------------------------------------------------------------------
 # Project paths
 # ---------------------------------------------------------------------------
-
-BASE_DIR: Path = Path(__file__).parent.resolve()
 ASSETS_DIR: Path = BASE_DIR / "assets"
 
 # Persistent memory file (user preferences / facts across sessions)
 MEMORY_FILE: Path = BASE_DIR / "jarvis_memory.json"
+
+# SQLite store for structured data (tasks, reminders, expenses, habits, mood)
+DATA_DIR: Path = BASE_DIR / "data"
+DB_FILE: Path = DATA_DIR / "jarvis.db"
+
+# ---------------------------------------------------------------------------
+# Grafana / Prometheus / Loki (DevOps module — /status, /logs)
+# ---------------------------------------------------------------------------
+
+# Grafana base URL, e.g. https://grafana.example.com (no trailing slash)
+GRAFANA_URL: str = os.environ.get("GRAFANA_URL", "").rstrip("/")
+
+# Grafana service account API token (Bearer auth) — /api is excluded from the
+# ingress basic auth, so this token is the only auth the bot needs to send.
+GRAFANA_API_TOKEN: str = os.environ.get("GRAFANA_API_TOKEN", "")
+
+# Datasource UIDs — Grafana → Connections → Data sources → click one → UID is in the URL
+PROMETHEUS_DATASOURCE_UID: str = os.environ.get("PROMETHEUS_DATASOURCE_UID", "")
+LOKI_DATASOURCE_UID: str = os.environ.get("LOKI_DATASOURCE_UID", "")
+
+# Fixed namespace /status and /logs query — matches how you check things today
+K8S_NAMESPACE: str = os.environ.get("K8S_NAMESPACE", "dev")
 
 # ---------------------------------------------------------------------------
 # Ollama settings  (no API key — runs 100 % locally)
@@ -198,6 +230,24 @@ PROACTIVE_POLL_SECONDS: int = 30
 
 
 # ---------------------------------------------------------------------------
+# Telegram bot transport
+# ---------------------------------------------------------------------------
+
+# Bot token from @BotFather — never hardcode, always read from the environment.
+TELEGRAM_BOT_TOKEN: str = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+
+# Allowlist of Telegram chat IDs permitted to talk to this bot. The bot has no
+# login screen, so this list IS the authentication boundary — anyone who finds
+# the bot's username on Telegram can otherwise message it and see personal
+# task/finance/health data. Populate with your own chat_id (message the bot
+# once, then check the update payload / getUpdates to find it), via the
+# JARVIS_ALLOWED_CHAT_IDS env var as a comma-separated list.
+ALLOWED_CHAT_IDS: set[int] = {
+    int(cid) for cid in os.environ.get("JARVIS_ALLOWED_CHAT_IDS", "").split(",") if cid.strip()
+}
+
+
+# ---------------------------------------------------------------------------
 # Validation helper
 # ---------------------------------------------------------------------------
 
@@ -217,5 +267,21 @@ def validate_config() -> list[str]:
         warnings.append(
             f"Ollama server not reachable at {OLLAMA_BASE_URL}. "
             "Run `ollama serve` and ensure the model is pulled."
+        )
+    return warnings
+
+
+def validate_bot_config() -> list[str]:
+    """Return a list of Telegram bot configuration warnings (empty = all good)."""
+    warnings: list[str] = []
+    if not TELEGRAM_BOT_TOKEN:
+        warnings.append(
+            "TELEGRAM_BOT_TOKEN is not set. Export it before running bot mode: "
+            "export TELEGRAM_BOT_TOKEN=<token from @BotFather>"
+        )
+    if not ALLOWED_CHAT_IDS:
+        warnings.append(
+            "JARVIS_ALLOWED_CHAT_IDS is empty — the bot will reject every message. "
+            "Export a comma-separated list of your Telegram chat_id(s)."
         )
     return warnings
