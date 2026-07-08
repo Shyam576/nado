@@ -166,20 +166,55 @@ def text_mode() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Telegram bot mode
+# Bot mode — runs whichever chat transports (Telegram, Discord) are configured
 # ---------------------------------------------------------------------------
 
 
+async def _run_bot_transports() -> None:
+    """Build and concurrently run every configured transport until interrupted."""
+    import asyncio
+
+    from config import DISCORD_BOT_TOKEN, TELEGRAM_BOT_TOKEN
+
+    tasks_to_run = []
+
+    if TELEGRAM_BOT_TOKEN:
+        from bot.telegram_bot import build_application, run as run_telegram
+
+        application = build_application()
+        tasks_to_run.append(run_telegram(application))
+    else:
+        logger.info("TELEGRAM_BOT_TOKEN not set — Telegram transport disabled.")
+
+    if DISCORD_BOT_TOKEN:
+        from bot.discord_bot import build_client, run as run_discord
+
+        client = build_client()
+        tasks_to_run.append(run_discord(client))
+    else:
+        logger.info("DISCORD_TOKEN not set — Discord transport disabled.")
+
+    if not tasks_to_run:
+        raise RuntimeError(
+            "No bot transport is configured. Set TELEGRAM_BOT_TOKEN and/or DISCORD_TOKEN in .env."
+        )
+
+    await asyncio.gather(*tasks_to_run)
+
+
 def bot_mode() -> None:
-    """Run Jarvis as a Telegram bot (long-polling). Press Ctrl-C to exit."""
+    """Run Jarvis as a chat bot across every configured transport. Press Ctrl-C to exit."""
+    import asyncio
+
     from config import validate_bot_config
 
     for warning in validate_bot_config():
         logger.warning(warning)
 
-    from bot.telegram_bot import run as run_bot
-
-    run_bot()
+    try:
+        asyncio.run(_run_bot_transports())
+    except KeyboardInterrupt:
+        logger.info("Shutdown requested.")
 
 
 # ---------------------------------------------------------------------------

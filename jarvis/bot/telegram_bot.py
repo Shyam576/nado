@@ -2,22 +2,32 @@
 bot/telegram_bot.py — Telegram transport for Jarvis.
 
 Receives messages via long-polling, enforces the chat_id allowlist (the only
-auth boundary — see config.ALLOWED_CHAT_IDS), routes recognised slash commands
-through bot.commands.dispatch(), and falls through to the LLM chat path
-(brain.ask) for everything else.
+auth boundary — see config.TELEGRAM_ALLOWED_CHAT_IDS), routes recognised
+slash commands through bot.commands.dispatch() (shared with every other
+transport), and falls through to the LLM chat path (brain.ask) for
+everything else. All data is stored under the shared config.OWNER_ID, not
+the platform-specific chat_id — see config.py's "Multi-platform identity"
+section for why.
+
+Uses PTB's lower-level async API (initialize/start/start_polling) rather
+than the Application.run_polling() convenience wrapper, since that wrapper
+owns its own event loop and can't run alongside Discord's client in the same
+process — see main.py's bot_mode(), which drives both via asyncio.gather.
 
 Run with:  python main.py bot
 """
 
+import asyncio
 import datetime
 import logging
 
 from telegram import Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
+from bot import notifier
 from bot.commands import dispatch
 from brain import ask
-from config import ALLOWED_CHAT_IDS, TELEGRAM_BOT_TOKEN
+from config import OWNER_ID, TELEGRAM_ALLOWED_CHAT_IDS, TELEGRAM_BOT_TOKEN
 from modules import digest, finance, habits, tasks
 
 logger = logging.getLogger(__name__)
@@ -37,7 +47,7 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     chat_id = chat.id
-    if chat_id not in ALLOWED_CHAT_IDS:
+    if chat_id not in TELEGRAM_ALLOWED_CHAT_IDS:
         logger.warning("Rejected message from unauthorised chat_id=%s", chat_id)
         return  # silently ignore — do not confirm the bot exists to strangers
 
@@ -45,7 +55,7 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     logger.info("Received from chat_id=%s: %s", chat_id, text)
 
     try:
-        reply = dispatch(str(chat_id), text)
+        reply = dispatch(OWNER_ID, text)
         if reply is None:
             reply = ask(text)
     except Exception as exc:  # noqa: BLE001
@@ -60,59 +70,32 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def _deliver_due_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Job-queue callback: send any reminders whose fire time has passed.
-
-    Only delivers to chat_ids in the allowlist, even though reminders can
-    currently only be created by an allowlisted chat in the first place —
-    this keeps the delivery path honest if that ever changes.
-    """
+    """Job-queue callback: broadcast any reminders whose fire time has passed."""
     for reminder in tasks.get_due_reminders():
-        chat_id = reminder["chat_id"]
-        if int(chat_id) not in ALLOWED_CHAT_IDS:
-            continue
         try:
-            await context.bot.send_message(chat_id=chat_id, text=f"Reminder: {reminder['message']}")
+            await notifier.broadcast(f"Reminder: {reminder['message']}")
             tasks.mark_delivered(reminder["id"])
         except Exception as exc:  # noqa: BLE001
             logger.exception("Failed to deliver reminder id=%s: %s", reminder["id"], exc)
 
 
 async def _check_gold_target(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Job-queue callback: alert if the stored gold price target has been reached.
-
-    memory.py's preference store is global (single-user), so the alert is
-    broadcast to every allowlisted chat rather than a specific chat_id — fine
-    while there's one real user; revisit if ALLOWED_CHAT_IDS ever grows.
-    """
+    """Job-queue callback: broadcast if the stored gold price target has been reached."""
     alert = finance.check_price_target()
-    if not alert:
-        return
-    for chat_id in ALLOWED_CHAT_IDS:
-        try:
-            await context.bot.send_message(chat_id=chat_id, text=alert)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Failed to deliver gold target alert to %s: %s", chat_id, exc)
+    if alert:
+        await notifier.broadcast(alert)
 
 
 async def _check_ter_targets(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Job-queue callback: alert on any reached TER buy/sell price targets."""
+    """Job-queue callback: broadcast on any reached TER buy/sell price targets."""
     for alert in finance.check_ter_targets():
-        for chat_id in ALLOWED_CHAT_IDS:
-            try:
-                await context.bot.send_message(chat_id=chat_id, text=alert)
-            except Exception as exc:  # noqa: BLE001
-                logger.exception("Failed to deliver TER target alert to %s: %s", chat_id, exc)
+        await notifier.broadcast(alert)
 
 
 async def _check_habit_gaps(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Job-queue callback: alert on any habit gaps, targeted to their own chat_id."""
-    for chat_id, alert in habits.check_habit_gaps():
-        if int(chat_id) not in ALLOWED_CHAT_IDS:
-            continue
-        try:
-            await context.bot.send_message(chat_id=chat_id, text=alert)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Failed to deliver habit gap alert to %s: %s", chat_id, exc)
+    """Job-queue callback: broadcast on any habit gaps."""
+    for _chat_id, alert in habits.check_habit_gaps():
+        await notifier.broadcast(alert)
 
 
 async def _record_price_snapshots(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -124,26 +107,16 @@ async def _record_price_snapshots(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def _send_daily_digest(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Job-queue callback: send the daily digest to every allowlisted chat."""
-    for chat_id in ALLOWED_CHAT_IDS:
-        try:
-            text = digest.build_daily_digest(str(chat_id))
-            await context.bot.send_message(chat_id=chat_id, text=text)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Failed to deliver daily digest to %s: %s", chat_id, exc)
+    """Job-queue callback: broadcast the daily digest."""
+    try:
+        text = digest.build_daily_digest(OWNER_ID)
+        await notifier.broadcast(text)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to build/deliver daily digest: %s", exc)
 
 
-def run() -> None:
-    """Start the Telegram bot and block, polling for updates until interrupted."""
-    if not TELEGRAM_BOT_TOKEN:
-        raise RuntimeError(
-            "TELEGRAM_BOT_TOKEN is not set. Export it before running bot mode."
-        )
-    if not ALLOWED_CHAT_IDS:
-        logger.warning(
-            "JARVIS_ALLOWED_CHAT_IDS is empty — every incoming message will be rejected."
-        )
-
+def build_application() -> Application:
+    """Construct and configure the Telegram Application (does not connect yet)."""
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     application.add_handler(MessageHandler(filters.TEXT, _handle_message))
     application.job_queue.run_repeating(
@@ -165,6 +138,32 @@ def run() -> None:
     application.job_queue.run_daily(
         _send_daily_digest, time=datetime.time(hour=DAILY_DIGEST_HOUR, minute=0, tzinfo=local_tz)
     )
+    return application
 
+
+async def run(application: Application) -> None:
+    """Start the Telegram bot and block (until cancelled) via long-polling.
+
+    Args:
+        application: An Application built by build_application() — passed in
+                     rather than constructed here so main.py can register it
+                     with notifier before the connection starts.
+    """
+    if not TELEGRAM_BOT_TOKEN:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN is not set. Export it before running bot mode.")
+    if not TELEGRAM_ALLOWED_CHAT_IDS:
+        logger.warning("JARVIS_ALLOWED_CHAT_IDS is empty — every incoming message will be rejected.")
+
+    notifier.register_telegram(application.bot)
+
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
     logger.info("Telegram bot starting (long-polling)...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+    try:
+        await asyncio.Event().wait()  # run until the task is cancelled by main.py
+    finally:
+        await application.updater.stop()
+        await application.stop()
+        await application.shutdown()

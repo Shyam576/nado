@@ -42,4 +42,5 @@ numpy>=1.24.0
 # Telegram bot transport (bot mode — python main.py bot)
 # [job-queue] extra pulls in APScheduler, needed for reminder delivery polling
 python-telegram-bot[job-queue]>=21.0
+discord.py>=2.3.0      # Discord bot transport (runs alongside Telegram in bot mode)
 python-dotenv>=1.0.0   # loads TELEGRAM_BOT_TOKEN / JARVIS_ALLOWED_CHAT_IDS from .env

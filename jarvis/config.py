@@ -230,6 +230,18 @@ PROACTIVE_POLL_SECONDS: int = 30
 
 
 # ---------------------------------------------------------------------------
+# Multi-platform identity
+# ---------------------------------------------------------------------------
+
+# Jarvis is a single-user assistant reachable from multiple chat platforms
+# (Telegram, Discord). All task/reminder/habit/mood data is stored under this
+# one canonical ID regardless of which platform the command came from, so
+# e.g. "/tasks add" from Telegram and from Discord hit the same list. Each
+# transport still has its own separate allowlist below — that's about *who's
+# allowed to talk to the bot on that platform*, not about data storage.
+OWNER_ID: str = "owner"
+
+# ---------------------------------------------------------------------------
 # Telegram bot transport
 # ---------------------------------------------------------------------------
 
@@ -242,8 +254,22 @@ TELEGRAM_BOT_TOKEN: str = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 # task/finance/health data. Populate with your own chat_id (message the bot
 # once, then check the update payload / getUpdates to find it), via the
 # JARVIS_ALLOWED_CHAT_IDS env var as a comma-separated list.
-ALLOWED_CHAT_IDS: set[int] = {
+TELEGRAM_ALLOWED_CHAT_IDS: set[int] = {
     int(cid) for cid in os.environ.get("JARVIS_ALLOWED_CHAT_IDS", "").split(",") if cid.strip()
+}
+
+# ---------------------------------------------------------------------------
+# Discord bot transport
+# ---------------------------------------------------------------------------
+
+# Bot token from the Discord Developer Portal — never hardcode.
+DISCORD_BOT_TOKEN: str = os.environ.get("DISCORD_TOKEN", "")
+
+# Allowlist of Discord channel IDs the bot will respond in — same auth-boundary
+# role as TELEGRAM_ALLOWED_CHAT_IDS. Messages from any other channel (or from
+# other users in an allowed channel) are ignored. Comma-separated for multiple.
+DISCORD_ALLOWED_CHANNEL_IDS: set[int] = {
+    int(cid) for cid in os.environ.get("DISCORD_CHANNEL_ID", "").split(",") if cid.strip()
 }
 
 
@@ -272,16 +298,23 @@ def validate_config() -> list[str]:
 
 
 def validate_bot_config() -> list[str]:
-    """Return a list of Telegram bot configuration warnings (empty = all good)."""
+    """Return a list of bot configuration warnings across all transports (empty = all good)."""
     warnings: list[str] = []
     if not TELEGRAM_BOT_TOKEN:
         warnings.append(
             "TELEGRAM_BOT_TOKEN is not set. Export it before running bot mode: "
             "export TELEGRAM_BOT_TOKEN=<token from @BotFather>"
         )
-    if not ALLOWED_CHAT_IDS:
+    if not TELEGRAM_ALLOWED_CHAT_IDS:
         warnings.append(
-            "JARVIS_ALLOWED_CHAT_IDS is empty — the bot will reject every message. "
-            "Export a comma-separated list of your Telegram chat_id(s)."
+            "JARVIS_ALLOWED_CHAT_IDS is empty — the Telegram transport will reject every message."
+        )
+    if not DISCORD_BOT_TOKEN:
+        warnings.append(
+            "DISCORD_TOKEN is not set. Export it before running bot mode."
+        )
+    if not DISCORD_ALLOWED_CHANNEL_IDS:
+        warnings.append(
+            "DISCORD_CHANNEL_ID is empty — the Discord transport will ignore every message."
         )
     return warnings
