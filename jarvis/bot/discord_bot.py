@@ -11,6 +11,8 @@ Run with:  python main.py bot
 """
 
 import logging
+import tempfile
+from pathlib import Path
 
 import discord
 
@@ -18,6 +20,7 @@ from bot import notifier
 from bot.commands import dispatch
 from brain import ask
 from config import DISCORD_ALLOWED_CHANNEL_IDS, DISCORD_BOT_TOKEN, OWNER_ID
+from modules import expenses
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +47,26 @@ def _chunk(text: str) -> list[str]:
     return chunks
 
 
+async def _handle_receipt_image(message: discord.Message, attachment: discord.Attachment) -> None:
+    """OCR + log a payment-screenshot attachment as an expense, then reply."""
+    logger.info("Received image from Discord channel_id=%s: %s", message.channel.id, attachment.filename)
+
+    try:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            local_path = Path(tmp_dir) / attachment.filename
+            await attachment.save(local_path)
+            caption = message.content.strip() or None
+            reply = expenses.add_expense_from_image(OWNER_ID, str(local_path), caption=caption)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error handling Discord image: %s", exc)
+        reply = "Something went wrong processing that image. Give me a moment and try again."
+
+    try:
+        await message.channel.send(reply)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to send Discord image reply: %s", exc)
+
+
 def build_client() -> discord.Client:
     """Construct and configure the Discord client (does not connect yet)."""
     intents = discord.Intents.default()
@@ -61,6 +84,13 @@ def build_client() -> discord.Client:
         if message.channel.id not in DISCORD_ALLOWED_CHANNEL_IDS:
             return
 
+        image_attachments = [
+            a for a in message.attachments if (a.content_type or "").startswith("image/")
+        ]
+        if image_attachments:
+            await _handle_receipt_image(message, image_attachments[0])
+            return
+
         text = message.content.strip()
         if not text:
             return
@@ -75,9 +105,11 @@ def build_client() -> discord.Client:
             logger.exception("Error handling Discord message: %s", exc)
             reply = "Something went wrong on my end. Give me a moment and try again."
 
+        logger.info("Replying (len=%d): %.80s", len(reply), reply)
         try:
             for chunk in _chunk(reply):
-                await message.channel.send(chunk)
+                sent = await message.channel.send(chunk)
+                logger.info("Discord send succeeded, message_id=%s", sent.id)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Failed to send Discord reply (len=%d): %s", len(reply), exc)
             await message.channel.send("Something went wrong sending that reply.")

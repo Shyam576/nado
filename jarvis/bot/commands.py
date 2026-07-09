@@ -8,7 +8,7 @@ through to the LLM chat path in bot/telegram_bot.py.
 
 from typing import Callable
 
-from modules import communication, decision, devops, digest, finance, habits, tasks
+from modules import communication, decision, devops, digest, expenses, finance, habits, tasks
 
 NOT_IMPLEMENTED = "Not implemented yet — coming in a later build step."
 
@@ -32,6 +32,13 @@ def _handle_habit(chat_id: str, args: list[str]) -> str:
     if args and args[0].lower() == "status":
         return habits.habit_status(chat_id, args[1:])
     return habits.log_habit(chat_id, args)
+
+
+def _handle_budget(chat_id: str, args: list[str]) -> str:
+    """Route /budget subcommands: status (default), or set <amount>."""
+    if args and args[0].lower() == "set":
+        return expenses.set_budget(chat_id, args[1:])
+    return expenses.budget_status(chat_id, args)
 
 
 def _handle_tasks(chat_id: str, args: list[str]) -> str:
@@ -62,6 +69,8 @@ HELP_TEXT: dict[str, str] = {
     "/mood": "/mood <mood> [1-10] [note] | /mood history — log or view mood entries",
     "/habit": "/habit <name> | /habit status [name] — log a habit or check streaks",
     "/digest": "/digest — tasks, habits, and market movement in one summary (also sent daily at 7 AM)",
+    "/expenses": "/expenses [N] — list recent expenses (send a payment screenshot to log one)",
+    "/budget": "/budget | /budget set <amount> — check or set your monthly budget",
     "/help": "/help — show this list",
 }
 
@@ -78,6 +87,8 @@ COMMANDS: dict[str, Callable[[str, list[str]], str]] = {
     "/mood": _handle_mood,
     "/habit": _handle_habit,
     "/digest": lambda chat_id, args: digest.build_daily_digest(chat_id),
+    "/expenses": lambda chat_id, args: expenses.list_expenses(chat_id, args),
+    "/budget": _handle_budget,
     "/help": lambda chat_id, args: (
         "Available commands:\n"
         + "\n".join(HELP_TEXT.values())

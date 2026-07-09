@@ -20,6 +20,8 @@ Run with:  python main.py bot
 import asyncio
 import datetime
 import logging
+import tempfile
+from pathlib import Path
 
 from telegram import Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
@@ -28,7 +30,7 @@ from bot import notifier
 from bot.commands import dispatch
 from brain import ask
 from config import OWNER_ID, TELEGRAM_ALLOWED_CHAT_IDS, TELEGRAM_BOT_TOKEN
-from modules import digest, finance, habits, tasks
+from modules import digest, expenses, finance, habits, tasks
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +69,38 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to send reply (len=%d): %s", len(reply), exc)
         await message.reply_text("Something went wrong sending that reply.")
+
+
+async def _handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle an incoming photo: authenticate, OCR + log as an expense, reply."""
+    message = update.effective_message
+    chat = update.effective_chat
+    if message is None or chat is None or not message.photo:
+        return
+
+    chat_id = chat.id
+    if chat_id not in TELEGRAM_ALLOWED_CHAT_IDS:
+        logger.warning("Rejected photo from unauthorised chat_id=%s", chat_id)
+        return
+
+    logger.info("Received photo from chat_id=%s", chat_id)
+
+    try:
+        largest_photo = message.photo[-1]  # Telegram sends multiple sizes; last is highest-res
+        telegram_file = await largest_photo.get_file()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            local_path = Path(tmp_dir) / "receipt.jpg"
+            await telegram_file.download_to_drive(custom_path=str(local_path))
+            reply = expenses.add_expense_from_image(OWNER_ID, str(local_path), caption=message.caption)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error handling photo: %s", exc)
+        reply = "Something went wrong processing that image. Give me a moment and try again."
+
+    try:
+        await message.reply_text(reply)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to send photo reply: %s", exc)
 
 
 async def _deliver_due_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -119,6 +153,7 @@ def build_application() -> Application:
     """Construct and configure the Telegram Application (does not connect yet)."""
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     application.add_handler(MessageHandler(filters.TEXT, _handle_message))
+    application.add_handler(MessageHandler(filters.PHOTO, _handle_photo))
     application.job_queue.run_repeating(
         _deliver_due_reminders, interval=REMINDER_POLL_SECONDS, first=REMINDER_POLL_SECONDS
     )
