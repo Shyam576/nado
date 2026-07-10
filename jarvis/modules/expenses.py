@@ -25,6 +25,21 @@ logger = logging.getLogger(__name__)
 
 RECEIPTS_DIR = DATA_DIR / "receipts"
 
+# Fixed category set — a small model classifies far more reliably into a
+# short fixed list than it extracts/invents free-form labels.
+CATEGORIES: list[str] = [
+    "Food",
+    "Transport",
+    "Utilities/Bills",
+    "Family Support",
+    "Health",
+    "Investment/Gold",
+    "Drinking",
+    "Junk",
+    "Snooker",
+    "Miscellaneous",
+]
+
 _EXTRACT_SYSTEM = (
     "You extract structured data from OCR text of a mobile banking payment "
     "confirmation screenshot. The OCR may contain noise/garbled characters.\n\n"
@@ -40,6 +55,17 @@ _EXTRACT_SYSTEM = (
     "Never substitute a bank name, address, or account number for remarks.\n\n"
     "If a field cannot be determined confidently, use null. Do not guess or invent "
     "values. Output ONLY the JSON object, no other text."
+)
+
+_CATEGORY_SYSTEM = (
+    "Classify this expense into exactly one of the following categories, based on the "
+    "recipient name and remarks given. Categories:\n" + "\n".join(f"- {c}" for c in CATEGORIES) + "\n\n"
+    "Guidance: 'Investment/Gold' covers gold/precious-metal purchases. 'Family Support' covers "
+    "money sent to family members. 'Drinking' covers alcohol/bars. 'Junk' covers snacks/fast food "
+    "(distinct from 'Food' which is regular meals/groceries). 'Snooker' covers snooker/pool halls. "
+    "'Miscellaneous' is for anything that doesn't clearly fit another category — use it rather than "
+    "forcing a poor fit.\n\n"
+    "Respond with ONLY the exact category name from the list above, nothing else."
 )
 
 
@@ -92,6 +118,40 @@ def _extract_fields(ocr_text: str) -> dict:
         return {"amount": None, "recipient": None, "date": None, "remarks": None}
 
 
+def _classify_category(recipient: Optional[str], remarks: Optional[str]) -> str:
+    """Classify an expense into one of CATEGORIES using the recipient/remarks text.
+
+    Args:
+        recipient: The extracted recipient name, if any.
+        remarks: The extracted (or user-supplied) remarks, if any.
+
+    Returns:
+        One of CATEGORIES. Falls back to "Miscellaneous" on any failure or
+        if the model's response doesn't exactly match a known category.
+    """
+    import brain  # local import — avoids loading the LLM at module import time
+
+    context = f"Recipient: {recipient or 'unknown'}\nRemarks: {remarks or 'none'}"
+    try:
+        llm = brain._get_llm()
+        response = llm.create_chat_completion(
+            messages=[
+                {"role": "system", "content": _CATEGORY_SYSTEM},
+                {"role": "user", "content": context},
+            ],
+            max_tokens=20,
+            temperature=0.1,
+        )
+        answer = response["choices"][0]["message"]["content"].strip()
+        for category in CATEGORIES:
+            if category.lower() == answer.lower():
+                return category
+        logger.warning("Category classification returned unrecognised value: %r", answer)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Category classification failed: %s", exc)
+    return "Miscellaneous"
+
+
 def add_expense_from_image(chat_id: str, image_path: str, caption: Optional[str] = None) -> str:
     """OCR + extract + store an expense from a payment-screenshot image.
 
@@ -114,6 +174,7 @@ def add_expense_from_image(chat_id: str, image_path: str, caption: Optional[str]
 
     fields = _extract_fields(ocr_text)
     remarks = caption.strip() if caption and caption.strip() else fields["remarks"]
+    category = _classify_category(fields["recipient"], remarks)
 
     RECEIPTS_DIR.mkdir(parents=True, exist_ok=True)
     stored_name = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{Path(image_path).suffix}"
@@ -132,13 +193,14 @@ def add_expense_from_image(chat_id: str, image_path: str, caption: Optional[str]
 
     with get_connection() as conn:
         conn.execute(
-            "INSERT INTO expenses (chat_id, amount, recipient, remarks, raw_ocr_text, "
-            "image_filename, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO expenses (chat_id, amount, recipient, remarks, category, raw_ocr_text, "
+            "image_filename, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 chat_id,
                 amount,
                 fields["recipient"],
                 remarks,
+                category,
                 ocr_text,
                 stored_name,
                 datetime.datetime.now().isoformat(),
@@ -151,9 +213,51 @@ def add_expense_from_image(chat_id: str, image_path: str, caption: Optional[str]
             "check /expenses to review and correct it if needed."
         )
 
-    line = f"Logged expense: {amount:,.2f} BTN"
+    line = f"Logged expense: {amount:,.2f} BTN [{category}]"
     if fields["recipient"]:
         line += f" to {fields['recipient']}"
+    if remarks:
+        line += f" — {remarks}"
+    return line
+
+
+def add_expense_from_text(chat_id: str = "", args: Optional[list[str]] = None) -> str:
+    """Log an expense from a typed amount + description, no screenshot needed.
+
+    Args:
+        chat_id: The owner this expense belongs to.
+        args: [amount, description_words...] e.g. ["500", "lunch", "with", "team"].
+              Only the leading amount is parsed structurally (fast, reliable,
+              no LLM needed for that part) — same "structured input, no LLM"
+              principle as every other command. Category classification still
+              uses the LLM since that's a judgment call, same as the image flow.
+
+    Returns:
+        A confirmation, or a usage message if no valid leading amount was given.
+    """
+    args = args or []
+    if not args:
+        return "Usage: /spend <amount> <description>"
+
+    try:
+        amount = float(args[0])
+    except ValueError:
+        return "Usage: /spend <amount> <description>"
+
+    if amount <= 0:
+        return "Amount must be positive."
+
+    remarks = " ".join(args[1:]).strip() or None
+    category = _classify_category(None, remarks)
+
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO expenses (chat_id, amount, remarks, category, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (chat_id, amount, remarks, category, datetime.datetime.now().isoformat()),
+        )
+
+    line = f"Logged expense: {amount:,.2f} BTN [{category}]"
     if remarks:
         line += f" — {remarks}"
     return line
@@ -176,7 +280,7 @@ def list_expenses(chat_id: str = "", args: Optional[list[str]] = None) -> str:
 
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT id, amount, currency, recipient, remarks, created_at FROM expenses "
+            "SELECT id, amount, currency, recipient, remarks, category, created_at FROM expenses "
             "WHERE chat_id = ? ORDER BY created_at DESC LIMIT ?",
             (chat_id, limit),
         ).fetchall()
@@ -188,13 +292,90 @@ def list_expenses(chat_id: str = "", args: Optional[list[str]] = None) -> str:
     for row in rows:
         when = datetime.datetime.fromisoformat(row["created_at"]).strftime("%b %-d")
         amount_str = f"{row['amount']:,.2f}" if row["amount"] is not None else "?"
-        line = f"#{row['id']} {when} — {amount_str} {row['currency']}"
+        category = row["category"] or "Uncategorised"
+        line = f"#{row['id']} {when} — {amount_str} {row['currency']} [{category}]"
         if row["recipient"]:
             line += f" to {row['recipient']}"
         if row["remarks"]:
             line += f" ({row['remarks']})"
         lines.append(line)
     return "\n".join(lines)
+
+
+def set_amount(chat_id: str = "", args: Optional[list[str]] = None) -> str:
+    """Manually correct the amount of a previously logged expense.
+
+    Args:
+        chat_id: The owner attempting the correction (ownership check).
+        args: [id, amount].
+
+    Returns:
+        A confirmation, or an error/usage message.
+    """
+    args = args or []
+    if len(args) < 2 or not args[0].isdigit():
+        return "Usage: /expenses amount <id> <value>"
+
+    expense_id = int(args[0])
+    try:
+        amount = float(args[1])
+    except ValueError:
+        return "Usage: /expenses amount <id> <value>"
+
+    if amount <= 0:
+        return "Amount must be positive."
+
+    with get_connection() as conn:
+        row = conn.execute("SELECT chat_id FROM expenses WHERE id = ?", (expense_id,)).fetchone()
+        if row is None or row["chat_id"] != chat_id:
+            return f"No expense #{expense_id} found."
+        conn.execute("UPDATE expenses SET amount = ? WHERE id = ?", (amount, expense_id))
+
+    return f"Expense #{expense_id} amount corrected to {amount:,.2f} BTN."
+
+
+def list_categories(chat_id: str = "", args: Optional[list[str]] = None) -> str:
+    """Return the fixed list of expense categories.
+
+    Args:
+        chat_id: Unused — kept for a consistent command-handler signature.
+        args: Unused — kept for a consistent command-handler signature.
+
+    Returns:
+        A newline-separated list of every category expenses can be classified into.
+    """
+    return "Categories:\n" + "\n".join(f"  {c}" for c in CATEGORIES)
+
+
+def set_category(chat_id: str = "", args: Optional[list[str]] = None) -> str:
+    """Manually correct the category of a previously logged expense.
+
+    Args:
+        chat_id: The owner attempting the correction (ownership check).
+        args: [id, category_words...] — category may be multi-word
+              (e.g. "Investment Gold" is matched case-insensitively
+              against CATEGORIES regardless of spacing/slashes).
+
+    Returns:
+        A confirmation, or an error/usage message.
+    """
+    args = args or []
+    if len(args) < 2 or not args[0].isdigit():
+        return f"Usage: /expenses category <id> <category>\nCategories: {', '.join(CATEGORIES)}"
+
+    expense_id = int(args[0])
+    requested = " ".join(args[1:]).strip().lower().replace("/", " ")
+    match = next((c for c in CATEGORIES if c.lower().replace("/", " ") == requested), None)
+    if match is None:
+        return f"Unknown category. Choose one of: {', '.join(CATEGORIES)}"
+
+    with get_connection() as conn:
+        row = conn.execute("SELECT chat_id FROM expenses WHERE id = ?", (expense_id,)).fetchone()
+        if row is None or row["chat_id"] != chat_id:
+            return f"No expense #{expense_id} found."
+        conn.execute("UPDATE expenses SET category = ? WHERE id = ?", (match, expense_id))
+
+    return f"Expense #{expense_id} recategorised to {match}."
 
 
 def set_budget(chat_id: str = "", args: Optional[list[str]] = None) -> str:
@@ -228,6 +409,29 @@ def set_budget(chat_id: str = "", args: Optional[list[str]] = None) -> str:
     return f"Monthly budget set to {amount:,.2f} BTN."
 
 
+def weekly_expense_summary(chat_id: str) -> dict:
+    """Return the last 7 days' spend total and per-category breakdown.
+
+    Args:
+        chat_id: The owner to total expenses for.
+
+    Returns:
+        A dict with keys: total (float), by_category (dict[str, float]).
+    """
+    week_ago = (datetime.datetime.now() - datetime.timedelta(days=7)).isoformat()
+
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT COALESCE(category, 'Uncategorised') AS category, SUM(amount) AS total "
+            "FROM expenses WHERE chat_id = ? AND created_at >= ? AND amount IS NOT NULL "
+            "GROUP BY category ORDER BY total DESC",
+            (chat_id, week_ago),
+        ).fetchall()
+
+    by_category = {row["category"]: row["total"] for row in rows}
+    return {"total": sum(by_category.values()), "by_category": by_category}
+
+
 def budget_status(chat_id: str = "", args: Optional[list[str]] = None) -> str:
     """Report this calendar month's spend against the configured budget.
 
@@ -258,5 +462,17 @@ def budget_status(chat_id: str = "", args: Optional[list[str]] = None) -> str:
             lines.append(f"Budget: {float(budget):,.2f} BTN — {remaining:,.2f} remaining.")
         else:
             lines.append(f"Budget: {float(budget):,.2f} BTN — over by {-remaining:,.2f}.")
+
+    if count:
+        with get_connection() as conn:
+            category_rows = conn.execute(
+                "SELECT COALESCE(category, 'Uncategorised') AS category, SUM(amount) AS total "
+                "FROM expenses WHERE chat_id = ? AND date(created_at) >= ? AND amount IS NOT NULL "
+                "GROUP BY category ORDER BY total DESC",
+                (chat_id, month_start),
+            ).fetchall()
+        lines.append("")
+        lines.append("By category:")
+        lines.extend(f"  {row['category']}: {row['total']:,.2f}" for row in category_rows)
 
     return "\n".join(lines)

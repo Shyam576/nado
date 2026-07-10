@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS expenses (
     currency TEXT NOT NULL DEFAULT 'BTN',
     recipient TEXT,
     remarks TEXT,
+    category TEXT,
     raw_ocr_text TEXT,
     image_filename TEXT,
     created_at TEXT NOT NULL
@@ -95,11 +96,22 @@ def init_db() -> None:
     """Create the data directory and tables if they don't already exist.
 
     Safe to call on every startup — CREATE TABLE IF NOT EXISTS is idempotent.
+    Also applies small additive column migrations for tables created before
+    that column existed (CREATE TABLE IF NOT EXISTS alone can't do this).
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with get_connection() as conn:
         conn.executescript(_SCHEMA)
+        _ensure_column(conn, "expenses", "category", "TEXT")
     logger.info("Store initialised at %s", DB_FILE)
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, sql_type: str) -> None:
+    """Add `column` to `table` if it doesn't already exist (additive migration only)."""
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")
+        logger.info("Migrated: added column %s.%s", table, column)
 
 
 @contextmanager

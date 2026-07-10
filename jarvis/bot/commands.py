@@ -34,6 +34,22 @@ def _handle_habit(chat_id: str, args: list[str]) -> str:
     return habits.log_habit(chat_id, args)
 
 
+def _handle_expenses(chat_id: str, args: list[str]) -> str:
+    """Route /expenses subcommands: list (default), category <id> <category>, or amount <id> <value>."""
+    if args and args[0].lower() == "category":
+        return expenses.set_category(chat_id, args[1:])
+    if args and args[0].lower() == "amount":
+        return expenses.set_amount(chat_id, args[1:])
+    return expenses.list_expenses(chat_id, args)
+
+
+def _handle_logs(chat_id: str, args: list[str]) -> str:
+    """Route /logs subcommands: raw tail (default), or summary <service>."""
+    if args and args[0].lower() == "summary":
+        return devops.summarize_logs(chat_id, args[1:])
+    return devops.tail_logs(chat_id, args)
+
+
 def _handle_budget(chat_id: str, args: list[str]) -> str:
     """Route /budget subcommands: status (default), or set <amount>."""
     if args and args[0].lower() == "set":
@@ -61,17 +77,23 @@ HELP_TEXT: dict[str, str] = {
     "/tasks": "/tasks [add <title> | done <id>] — list, add, or complete tasks",
     "/remind": "/remind <minutes> <message> — schedule a one-off reminder",
     "/status": "/status [namespace] — Kubernetes pod health, grouped by deployment",
-    "/logs": "/logs <service> [namespace] — recent log lines for a service",
+    "/logs": "/logs <service> [namespace] | /logs summary <service> — raw tail, or an LLM summary",
     "/gold": "/gold [target <price> | target clear] — gold spot price / alert target",
     "/ter": "/ter [usd|inr|btn|all] [target buy|sell <price> | target clear] — TER price / alerts",
     "/draft-email": "/draft-email <what to say> — draft an email via LLM",
+    "/rewrite": "/rewrite [tone] <text> — rewrite text in a different tone (professional/casual/formal/friendly/concise/assertive)",
+    "/notes": "/notes <raw text> — summarise meeting notes + auto-create action items as tasks",
     "/decide": "/decide <question> — decision support, grounded in your tasks/prices",
     "/mood": "/mood <mood> [1-10] [note] | /mood history — log or view mood entries",
     "/habit": "/habit <name> | /habit status [name] — log a habit or check streaks",
     "/digest": "/digest — tasks, habits, and market movement in one summary (also sent daily at 7 AM)",
-    "/expenses": "/expenses [N] — list recent expenses (send a payment screenshot to log one)",
+    "/weekly": "/weekly — reflective review of the last 7 days (tasks, mood, spending)",
+    "/spend": "/spend <amount> <description> — log an expense by typing it, no screenshot needed",
+    "/expenses": "/expenses [N] | /expenses category <id> <cat> | /expenses amount <id> <value> — list or fix an entry",
     "/budget": "/budget | /budget set <amount> — check or set your monthly budget",
+    "/categories": "/categories — list all expense categories",
     "/help": "/help — show this list",
+    "(voice)": "Send a voice note/audio file — it gets transcribed and processed like typed text",
 }
 
 COMMANDS: dict[str, Callable[[str, list[str]], str]] = {
@@ -81,14 +103,19 @@ COMMANDS: dict[str, Callable[[str, list[str]], str]] = {
     "/status": lambda chat_id, args: devops.k8s_health(chat_id, args),
     "/gold": lambda chat_id, args: finance.gold_price(chat_id, args),
     "/ter": _handle_ter,
-    "/logs": lambda chat_id, args: devops.tail_logs(chat_id, args),
+    "/logs": _handle_logs,
     "/draft-email": lambda chat_id, args: communication.draft_email(chat_id, args),
+    "/rewrite": lambda chat_id, args: communication.rewrite_message(chat_id, args),
+    "/notes": lambda chat_id, args: communication.process_meeting_notes(chat_id, args),
     "/decide": lambda chat_id, args: decision.decide(chat_id, args),
     "/mood": _handle_mood,
     "/habit": _handle_habit,
     "/digest": lambda chat_id, args: digest.build_daily_digest(chat_id),
-    "/expenses": lambda chat_id, args: expenses.list_expenses(chat_id, args),
+    "/weekly": lambda chat_id, args: digest.build_weekly_review(chat_id, args),
+    "/spend": lambda chat_id, args: expenses.add_expense_from_text(chat_id, args),
+    "/expenses": _handle_expenses,
     "/budget": _handle_budget,
+    "/categories": lambda chat_id, args: expenses.list_categories(chat_id, args),
     "/help": lambda chat_id, args: (
         "Available commands:\n"
         + "\n".join(HELP_TEXT.values())

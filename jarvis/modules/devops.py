@@ -124,6 +124,44 @@ def k8s_health(chat_id: str = "", args: Optional[list[str]] = None) -> str:
     return "\n".join(lines)
 
 
+def _fetch_log_lines(service: str, namespace: str) -> tuple[Optional[list[str]], Optional[str]]:
+    """Fetch and clean up recent log lines for a service — shared by tail_logs and summarize_logs.
+
+    Returns:
+        (lines, None) on success (lines may be empty), or (None, error_message) on failure.
+    """
+    if not LOKI_DATASOURCE_UID:
+        return None, "LOKI_DATASOURCE_UID is not configured — see .env."
+
+    logql = f'{{namespace="{namespace}", pod=~"{service}-.*"}}'
+    now_ns = int(time.time() * 1e9)
+    start_ns = now_ns - int(_LOG_LOOKBACK_SECONDS * 1e9)
+    data = _grafana_get(
+        f"/api/datasources/proxy/uid/{LOKI_DATASOURCE_UID}/loki/api/v1/query_range",
+        {
+            "query": logql,
+            "limit": "30",
+            "direction": "backward",
+            "start": str(start_ns),
+            "end": str(now_ns),
+        },
+    )
+    if data is None or data.get("status") != "success":
+        return None, f"Couldn't reach Loki for '{service}' in namespace '{namespace}' — try again shortly."
+
+    streams = data["data"]["result"]
+    lines = []
+    for stream in streams:
+        pod = stream["stream"].get("pod", service)
+        for _timestamp, line in stream["values"]:
+            clean_line = _ANSI_ESCAPE_RE.sub("", line).rstrip("\n")
+            if len(clean_line) > _MAX_LINE_CHARS:
+                clean_line = clean_line[:_MAX_LINE_CHARS] + "…"
+            lines.append(f"[{pod}] {clean_line}")
+
+    return lines[-30:], None
+
+
 def tail_logs(chat_id: str = "", args: Optional[list[str]] = None) -> str:
     """Return the most recent log lines for pods matching a service name prefix.
 
@@ -138,46 +176,65 @@ def tail_logs(chat_id: str = "", args: Optional[list[str]] = None) -> str:
     if not args:
         return "Usage: /logs <service-name>"
 
-    if not LOKI_DATASOURCE_UID:
-        return "LOKI_DATASOURCE_UID is not configured — see .env."
+    service = args[0]
+    namespace = args[1] if len(args) > 1 else K8S_NAMESPACE
+
+    lines, error = _fetch_log_lines(service, namespace)
+    if error:
+        return error
+    if not lines:
+        return f"No logs found for pods matching '{service}-*' in namespace '{namespace}'."
+
+    return _fit_to_reply_limit(lines)
+
+
+_LOG_SUMMARY_SYSTEM = (
+    "You are analysing raw Kubernetes pod logs. Summarise what's actually going on in "
+    "2-4 sentences: any errors/crashes/failures and their likely cause if evident from "
+    "the text, or confirm things look healthy if there's nothing concerning. Be specific "
+    "(name the actual error message or pattern) rather than vague. Plain text only."
+)
+
+
+def summarize_logs(chat_id: str = "", args: Optional[list[str]] = None) -> str:
+    """Fetch recent logs for a service and have the LLM summarise what's going on.
+
+    Args:
+        chat_id: Unused — kept for a consistent command-handler signature.
+        args: [service_name] required; optional args[1] as a namespace override.
+
+    Returns:
+        A short LLM-generated summary, or a usage/error message.
+    """
+    args = args or []
+    if not args:
+        return "Usage: /logs summary <service-name>"
 
     service = args[0]
     namespace = args[1] if len(args) > 1 else K8S_NAMESPACE
-    logql = f'{{namespace="{namespace}", pod=~"{service}-.*"}}'
 
-    now_ns = int(time.time() * 1e9)
-    start_ns = now_ns - int(_LOG_LOOKBACK_SECONDS * 1e9)
-    data = _grafana_get(
-        f"/api/datasources/proxy/uid/{LOKI_DATASOURCE_UID}/loki/api/v1/query_range",
-        {
-            "query": logql,
-            "limit": "30",
-            "direction": "backward",
-            "start": str(start_ns),
-            "end": str(now_ns),
-        },
-    )
-    if data is None or data.get("status") != "success":
-        return f"Couldn't reach Loki for '{service}' in namespace '{namespace}' — try again shortly."
-
-    streams = data["data"]["result"]
-    if not streams:
+    lines, error = _fetch_log_lines(service, namespace)
+    if error:
+        return error
+    if not lines:
         return f"No logs found for pods matching '{service}-*' in namespace '{namespace}'."
 
-    lines = []
-    for stream in streams:
-        pod = stream["stream"].get("pod", service)
-        for _timestamp, line in stream["values"]:
-            clean_line = _ANSI_ESCAPE_RE.sub("", line).rstrip("\n")
-            if len(clean_line) > _MAX_LINE_CHARS:
-                clean_line = clean_line[:_MAX_LINE_CHARS] + "…"
-            lines.append(f"[{pod}] {clean_line}")
+    import brain  # local import — avoids loading the LLM at module import time
 
-    lines = lines[-30:]  # LogQL already limits per-stream; cap the merged total too
-    if not lines:
-        return f"No logs found for '{service}'."
-
-    return _fit_to_reply_limit(lines)
+    try:
+        llm = brain._get_llm()
+        response = llm.create_chat_completion(
+            messages=[
+                {"role": "system", "content": _LOG_SUMMARY_SYSTEM},
+                {"role": "user", "content": "\n".join(lines)},
+            ],
+            max_tokens=250,
+            temperature=0.3,
+        )
+        return response["choices"][0]["message"]["content"].strip()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Log summarization LLM call failed: %s", exc)
+        return "Something went wrong summarising those logs — try again shortly."
 
 
 def _fit_to_reply_limit(lines: list[str]) -> str:

@@ -7,6 +7,14 @@ the LLM chat path for anything else. Auth here is channel-scoped (matches the
 channel ID you gave, not a personal-DM model) — only messages posted in an
 allowlisted channel are answered, everything else is silently ignored.
 
+Catch-up on reconnect: unlike Telegram (which queues missed updates
+server-side via getUpdates), Discord's gateway only pushes live events — a
+message sent while this process is offline (laptop asleep, network down)
+is NOT automatically redelivered on reconnect. To close that gap, on_ready
+scans each allowed channel's history back to the last message this bot
+actually processed (tracked via memory.py) and replays anything missed
+through the same _process_message() path as live messages.
+
 Run with:  python main.py bot
 """
 
@@ -16,16 +24,18 @@ from pathlib import Path
 
 import discord
 
+import memory
 from bot import notifier
 from bot.commands import dispatch
 from brain import ask
 from config import DISCORD_ALLOWED_CHANNEL_IDS, DISCORD_BOT_TOKEN, OWNER_ID
-from modules import expenses
+from modules import expenses, transcription
 
 logger = logging.getLogger(__name__)
 
 _DISCORD_MESSAGE_LIMIT = 2000
 _CHUNK_SIZE = 1900  # headroom under Discord's 2000-char cap
+_CATCHUP_SCAN_LIMIT = 200  # cap how far back we scan on reconnect, per channel
 
 
 def _chunk(text: str) -> list[str]:
@@ -45,6 +55,10 @@ def _chunk(text: str) -> list[str]:
         chunks.append(remaining[:split_at])
         remaining = remaining[split_at:].lstrip("\n")
     return chunks
+
+
+def _last_seen_key(channel_id: int) -> str:
+    return f"discord_last_seen_message_id_{channel_id}"
 
 
 async def _handle_receipt_image(message: discord.Message, attachment: discord.Attachment) -> None:
@@ -67,6 +81,132 @@ async def _handle_receipt_image(message: discord.Message, attachment: discord.At
         logger.exception("Failed to send Discord image reply: %s", exc)
 
 
+async def _handle_voice_attachment(message: discord.Message, attachment: discord.Attachment) -> None:
+    """Transcribe an audio/voice attachment, then process the transcript like text."""
+    logger.info("Received audio from Discord channel_id=%s: %s", message.channel.id, attachment.filename)
+
+    try:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            local_path = Path(tmp_dir) / attachment.filename
+            await attachment.save(local_path)
+            transcript = transcription.transcribe_audio_file(str(local_path))
+
+        if not transcript:
+            await message.channel.send("Couldn't make out any speech in that — try again?")
+            return
+
+        reply = dispatch(OWNER_ID, transcript)
+        if reply is None:
+            reply = ask(transcript)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error handling Discord voice message: %s", exc)
+        await message.channel.send("Something went wrong processing that voice message.")
+        return
+
+    try:
+        for chunk in _chunk(f"Heard: “{transcript}”\n\n{reply}"):
+            await message.channel.send(chunk)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to send Discord voice reply: %s", exc)
+
+
+async def _process_message(message: discord.Message, client_user) -> None:
+    """Authenticate and handle one message — shared by live on_message and catch-up replay.
+
+    Args:
+        message: The Discord message to process.
+        client_user: The bot's own user (to skip its own messages).
+    """
+    if message.author == client_user:
+        return
+    if message.channel.id not in DISCORD_ALLOWED_CHANNEL_IDS:
+        return
+
+    image_attachments = [
+        a for a in message.attachments if (a.content_type or "").startswith("image/")
+    ]
+    if image_attachments:
+        await _handle_receipt_image(message, image_attachments[0])
+        return
+
+    audio_attachments = [
+        a for a in message.attachments if (a.content_type or "").startswith("audio/")
+    ]
+    if audio_attachments:
+        await _handle_voice_attachment(message, audio_attachments[0])
+        return
+
+    text = message.content.strip()
+    if not text:
+        return
+
+    logger.info("Received from Discord channel_id=%s: %s", message.channel.id, text)
+
+    try:
+        reply = dispatch(OWNER_ID, text)
+        if reply is None:
+            reply = ask(text)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error handling Discord message: %s", exc)
+        reply = "Something went wrong on my end. Give me a moment and try again."
+
+    try:
+        for chunk in _chunk(reply):
+            await message.channel.send(chunk)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to send Discord reply (len=%d): %s", len(reply), exc)
+        await message.channel.send("Something went wrong sending that reply.")
+
+
+async def _catch_up(client: discord.Client) -> None:
+    """On (re)connect, replay any messages posted while this process was offline.
+
+    For each allowlisted channel, fetches history newer than the last
+    message we actually processed and runs it through _process_message() in
+    chronological order — same effect as if the bot had been online the
+    whole time. Updates the "last seen" marker as it goes so nothing is
+    replayed twice, and safely no-ops on first-ever run (nothing to compare
+    against yet, just establishes the baseline).
+    """
+    for channel_id in DISCORD_ALLOWED_CHANNEL_IDS:
+        try:
+            channel = client.get_channel(channel_id) or await client.fetch_channel(channel_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Catch-up: failed to fetch channel %s: %s", channel_id, exc)
+            continue
+
+        last_seen = memory.get_preference(_last_seen_key(channel_id))
+        after = discord.Object(id=int(last_seen)) if last_seen else None
+
+        try:
+            missed = [
+                msg async for msg in channel.history(
+                    after=after, limit=_CATCHUP_SCAN_LIMIT, oldest_first=True
+                )
+            ]
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Catch-up: failed to fetch history for channel %s: %s", channel_id, exc)
+            continue
+
+        if last_seen and missed:
+            logger.info("Catch-up: replaying %d missed message(s) in channel %s", len(missed), channel_id)
+        for msg in missed:
+            if last_seen:  # skip replay on the very first run — just establish the baseline
+                await _process_message(msg, client.user)
+            memory.set_preference(_last_seen_key(channel_id), str(msg.id))
+
+        if not missed:
+            # Nothing missed, but still need a baseline on first run — use the
+            # channel's current last message so future reconnects have something to diff against.
+            if not last_seen:
+                try:
+                    latest = [msg async for msg in channel.history(limit=1)]
+                    if latest:
+                        memory.set_preference(_last_seen_key(channel_id), str(latest[0].id))
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("Catch-up: failed to establish baseline for channel %s: %s", channel_id, exc)
+
+
 def build_client() -> discord.Client:
     """Construct and configure the Discord client (does not connect yet)."""
     intents = discord.Intents.default()
@@ -76,43 +216,13 @@ def build_client() -> discord.Client:
     @client.event
     async def on_ready():
         logger.info("Discord bot connected as %s", client.user)
+        await _catch_up(client)
 
     @client.event
     async def on_message(message: discord.Message):
-        if message.author == client.user:
-            return
-        if message.channel.id not in DISCORD_ALLOWED_CHANNEL_IDS:
-            return
-
-        image_attachments = [
-            a for a in message.attachments if (a.content_type or "").startswith("image/")
-        ]
-        if image_attachments:
-            await _handle_receipt_image(message, image_attachments[0])
-            return
-
-        text = message.content.strip()
-        if not text:
-            return
-
-        logger.info("Received from Discord channel_id=%s: %s", message.channel.id, text)
-
-        try:
-            reply = dispatch(OWNER_ID, text)
-            if reply is None:
-                reply = ask(text)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Error handling Discord message: %s", exc)
-            reply = "Something went wrong on my end. Give me a moment and try again."
-
-        logger.info("Replying (len=%d): %.80s", len(reply), reply)
-        try:
-            for chunk in _chunk(reply):
-                sent = await message.channel.send(chunk)
-                logger.info("Discord send succeeded, message_id=%s", sent.id)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Failed to send Discord reply (len=%d): %s", len(reply), exc)
-            await message.channel.send("Something went wrong sending that reply.")
+        await _process_message(message, client.user)
+        if message.channel.id in DISCORD_ALLOWED_CHANNEL_IDS:
+            memory.set_preference(_last_seen_key(message.channel.id), str(message.id))
 
     return client
 

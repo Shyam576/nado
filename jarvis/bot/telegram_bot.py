@@ -30,7 +30,7 @@ from bot import notifier
 from bot.commands import dispatch
 from brain import ask
 from config import OWNER_ID, TELEGRAM_ALLOWED_CHAT_IDS, TELEGRAM_BOT_TOKEN
-from modules import digest, expenses, finance, habits, tasks
+from modules import digest, expenses, finance, habits, tasks, transcription
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +103,49 @@ async def _handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.exception("Failed to send photo reply: %s", exc)
 
 
+async def _handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle an incoming voice note or audio file: transcribe, then process like text."""
+    message = update.effective_message
+    chat = update.effective_chat
+    if message is None or chat is None:
+        return
+
+    chat_id = chat.id
+    if chat_id not in TELEGRAM_ALLOWED_CHAT_IDS:
+        logger.warning("Rejected voice message from unauthorised chat_id=%s", chat_id)
+        return
+
+    voice_or_audio = message.voice or message.audio
+    if voice_or_audio is None:
+        return
+
+    logger.info("Received voice/audio from chat_id=%s", chat_id)
+
+    try:
+        telegram_file = await voice_or_audio.get_file()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            local_path = Path(tmp_dir) / "voice.ogg"
+            await telegram_file.download_to_drive(custom_path=str(local_path))
+            transcript = transcription.transcribe_audio_file(str(local_path))
+
+        if not transcript:
+            await message.reply_text("Couldn't make out any speech in that — try again?")
+            return
+
+        reply = dispatch(OWNER_ID, transcript)
+        if reply is None:
+            reply = ask(transcript)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Error handling voice message: %s", exc)
+        await message.reply_text("Something went wrong processing that voice message.")
+        return
+
+    try:
+        await message.reply_text(f"Heard: “{transcript}”\n\n{reply}")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to send voice reply: %s", exc)
+
+
 async def _deliver_due_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Job-queue callback: broadcast any reminders whose fire time has passed."""
     for reminder in tasks.get_due_reminders():
@@ -154,6 +197,7 @@ def build_application() -> Application:
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     application.add_handler(MessageHandler(filters.TEXT, _handle_message))
     application.add_handler(MessageHandler(filters.PHOTO, _handle_photo))
+    application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, _handle_voice))
     application.job_queue.run_repeating(
         _deliver_due_reminders, interval=REMINDER_POLL_SECONDS, first=REMINDER_POLL_SECONDS
     )

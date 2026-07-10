@@ -85,6 +85,25 @@ def mood_history(chat_id: str = "", args: list[str] | None = None) -> str:
     return "\n".join(lines)
 
 
+def weekly_mood_entries(chat_id: str) -> list[dict]:
+    """Return mood entries from the last 7 days, oldest first.
+
+    Args:
+        chat_id: The chat to look up.
+
+    Returns:
+        A list of dicts with keys: mood, energy, note, created_at.
+    """
+    week_ago = (datetime.datetime.now() - datetime.timedelta(days=7)).isoformat()
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT mood, energy, note, created_at FROM mood_log "
+            "WHERE chat_id = ? AND created_at >= ? ORDER BY created_at",
+            (chat_id, week_ago),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def log_habit(chat_id: str = "", args: list[str] | None = None) -> str:
     """Log today's completion of a habit (idempotent — one log per day).
 

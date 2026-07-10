@@ -159,6 +159,33 @@ def today_summary(chat_id: str) -> str:
     return "\n".join(lines)
 
 
+def weekly_stats(chat_id: str) -> dict:
+    """Return task completion counts for the last 7 days.
+
+    Args:
+        chat_id: The chat to compute stats for.
+
+    Returns:
+        A dict with keys: completed_count, pending_count, completed_titles.
+    """
+    week_ago = (datetime.datetime.now() - datetime.timedelta(days=7)).isoformat()
+
+    with get_connection() as conn:
+        completed = conn.execute(
+            "SELECT title FROM tasks WHERE chat_id = ? AND status = 'done' AND completed_at >= ?",
+            (chat_id, week_ago),
+        ).fetchall()
+        pending_count = conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE chat_id = ? AND status = 'pending'", (chat_id,)
+        ).fetchone()[0]
+
+    return {
+        "completed_count": len(completed),
+        "pending_count": pending_count,
+        "completed_titles": [row["title"] for row in completed],
+    }
+
+
 def get_due_reminders() -> list[dict]:
     """Return all undelivered reminders whose fire time has passed.
 
