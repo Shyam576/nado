@@ -30,7 +30,7 @@ from bot import notifier
 from bot.commands import dispatch
 from brain import ask
 from config import OWNER_ID, TELEGRAM_ALLOWED_CHAT_IDS, TELEGRAM_BOT_TOKEN
-from modules import digest, email_watcher, expenses, finance, habits, tasks, transcription
+from modules import digest, email_watcher, expenses, finance, habits, intent, nudges, tasks, transcription
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,9 @@ HABIT_GAP_POLL_SECONDS = 21600  # 6 hours — a daily-cadence check doesn't need
 PRICE_SNAPSHOT_POLL_SECONDS = 3600  # hourly — gives digest.py a same-day-granularity baseline
 EMAIL_POLL_SECONDS = 120  # 2 minutes — feels near-real-time without hammering the IMAP server
 DAILY_DIGEST_HOUR = 7  # local time, 24h clock
+BUDGET_PACING_POLL_SECONDS = 3600  # hourly — threshold state in nudges.py prevents repeats
+EVENING_NUDGE_HOUR = 21  # 9 PM — late enough that "no expenses today" is meaningful
+STALE_TASK_HOUR = 10  # mid-morning, when acting on a task nudge is most likely
 
 
 async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -59,6 +62,8 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     try:
         reply = dispatch(OWNER_ID, text)
+        if reply is None:
+            reply = intent.route(OWNER_ID, text)
         if reply is None:
             reply = ask(text)
     except Exception as exc:  # noqa: BLE001
@@ -135,6 +140,8 @@ async def _handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
         reply = dispatch(OWNER_ID, transcript)
         if reply is None:
+            reply = intent.route(OWNER_ID, transcript)
+        if reply is None:
             reply = ask(transcript)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error handling voice message: %s", exc)
@@ -190,6 +197,36 @@ async def _record_price_snapshots(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.exception("Failed to record price snapshots: %s", exc)
 
 
+async def _check_budget_pacing(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job-queue callback: broadcast when month spend crosses a budget threshold."""
+    try:
+        alert = nudges.budget_pacing_alert(OWNER_ID)
+        if alert:
+            await notifier.broadcast(alert)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Budget pacing check failed: %s", exc)
+
+
+async def _send_evening_expense_nudge(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job-queue callback: nudge once in the evening if nothing was logged today."""
+    try:
+        nudge = nudges.evening_expense_nudge(OWNER_ID)
+        if nudge:
+            await notifier.broadcast(nudge)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Evening expense nudge failed: %s", exc)
+
+
+async def _send_stale_task_nudge(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job-queue callback: surface pending tasks untouched for 5+ days (once each)."""
+    try:
+        nudge = nudges.stale_task_nudge(OWNER_ID)
+        if nudge:
+            await notifier.broadcast(nudge)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Stale task nudge failed: %s", exc)
+
+
 async def _send_daily_digest(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Job-queue callback: broadcast the daily digest."""
     try:
@@ -223,9 +260,20 @@ def build_application() -> Application:
     application.job_queue.run_repeating(
         _check_new_emails, interval=EMAIL_POLL_SECONDS, first=EMAIL_POLL_SECONDS
     )
+    application.job_queue.run_repeating(
+        _check_budget_pacing, interval=BUDGET_PACING_POLL_SECONDS, first=BUDGET_PACING_POLL_SECONDS
+    )
     local_tz = datetime.datetime.now().astimezone().tzinfo
     application.job_queue.run_daily(
         _send_daily_digest, time=datetime.time(hour=DAILY_DIGEST_HOUR, minute=0, tzinfo=local_tz)
+    )
+    application.job_queue.run_daily(
+        _send_evening_expense_nudge,
+        time=datetime.time(hour=EVENING_NUDGE_HOUR, minute=0, tzinfo=local_tz),
+    )
+    application.job_queue.run_daily(
+        _send_stale_task_nudge,
+        time=datetime.time(hour=STALE_TASK_HOUR, minute=0, tzinfo=local_tz),
     )
     return application
 

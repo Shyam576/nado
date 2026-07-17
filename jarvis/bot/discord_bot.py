@@ -29,7 +29,7 @@ from bot import notifier
 from bot.commands import dispatch
 from brain import ask
 from config import DISCORD_ALLOWED_CHANNEL_IDS, DISCORD_BOT_TOKEN, OWNER_ID
-from modules import expenses, transcription
+from modules import expenses, intent, transcription
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,8 @@ async def _handle_voice_attachment(message: discord.Message, attachment: discord
 
         reply = dispatch(OWNER_ID, transcript)
         if reply is None:
+            reply = intent.route(OWNER_ID, transcript)
+        if reply is None:
             reply = ask(transcript)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error handling Discord voice message: %s", exc)
@@ -144,6 +146,8 @@ async def _process_message(message: discord.Message, client_user) -> None:
 
     try:
         reply = dispatch(OWNER_ID, text)
+        if reply is None:
+            reply = intent.route(OWNER_ID, text)
         if reply is None:
             reply = ask(text)
     except Exception as exc:  # noqa: BLE001
