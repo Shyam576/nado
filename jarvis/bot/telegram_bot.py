@@ -30,7 +30,7 @@ from bot import notifier
 from bot.commands import dispatch
 from brain import ask
 from config import OWNER_ID, TELEGRAM_ALLOWED_CHAT_IDS, TELEGRAM_BOT_TOKEN
-from modules import digest, expenses, finance, habits, tasks, transcription
+from modules import digest, email_watcher, expenses, finance, habits, tasks, transcription
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,7 @@ REMINDER_POLL_SECONDS = 30
 GOLD_TARGET_POLL_SECONDS = 300
 HABIT_GAP_POLL_SECONDS = 21600  # 6 hours — a daily-cadence check doesn't need finer polling
 PRICE_SNAPSHOT_POLL_SECONDS = 3600  # hourly — gives digest.py a same-day-granularity baseline
+EMAIL_POLL_SECONDS = 120  # 2 minutes — feels near-real-time without hammering the IMAP server
 DAILY_DIGEST_HOUR = 7  # local time, 24h clock
 
 
@@ -175,6 +176,12 @@ async def _check_habit_gaps(context: ContextTypes.DEFAULT_TYPE) -> None:
         await notifier.broadcast(alert)
 
 
+async def _check_new_emails(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job-queue callback: broadcast any new emails since the last poll."""
+    for alert in email_watcher.check_new_emails():
+        await notifier.broadcast(alert)
+
+
 async def _record_price_snapshots(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Job-queue callback: store an hourly gold/TER price snapshot for digest.py."""
     try:
@@ -212,6 +219,9 @@ def build_application() -> Application:
     )
     application.job_queue.run_repeating(
         _record_price_snapshots, interval=PRICE_SNAPSHOT_POLL_SECONDS, first=10
+    )
+    application.job_queue.run_repeating(
+        _check_new_emails, interval=EMAIL_POLL_SECONDS, first=EMAIL_POLL_SECONDS
     )
     local_tz = datetime.datetime.now().astimezone().tzinfo
     application.job_queue.run_daily(

@@ -8,7 +8,7 @@ through to the LLM chat path in bot/telegram_bot.py.
 
 from typing import Callable
 
-from modules import communication, decision, devops, digest, expenses, finance, habits, tasks
+from modules import communication, decision, devops, digest, email_watcher, expenses, finance, habits, tasks
 
 NOT_IMPLEMENTED = "Not implemented yet — coming in a later build step."
 
@@ -57,6 +57,14 @@ def _handle_budget(chat_id: str, args: list[str]) -> str:
     return expenses.budget_status(chat_id, args)
 
 
+def _handle_check_email(chat_id: str, args: list[str]) -> str:
+    """On-demand IMAP poll — same check the background job runs every 2 minutes."""
+    alerts = email_watcher.check_new_emails()
+    if not alerts:
+        return "No new emails since the last check."
+    return "\n".join(alerts)
+
+
 def _handle_tasks(chat_id: str, args: list[str]) -> str:
     """Route /tasks subcommands: list (default), add <title>, done <id>."""
     if not args:
@@ -92,6 +100,7 @@ HELP_TEXT: dict[str, str] = {
     "/expenses": "/expenses [N] | /expenses category <id> <cat> | /expenses amount <id> <value> — list or fix an entry",
     "/budget": "/budget | /budget set <amount> — check or set your monthly budget",
     "/categories": "/categories — list all expense categories",
+    "/check-email": "/check-email — manually poll for new emails (also runs automatically every 2 minutes)",
     "/help": "/help — show this list",
     "(voice)": "Send a voice note/audio file — it gets transcribed and processed like typed text",
 }
@@ -116,6 +125,7 @@ COMMANDS: dict[str, Callable[[str, list[str]], str]] = {
     "/expenses": _handle_expenses,
     "/budget": _handle_budget,
     "/categories": lambda chat_id, args: expenses.list_categories(chat_id, args),
+    "/check-email": _handle_check_email,
     "/help": lambda chat_id, args: (
         "Available commands:\n"
         + "\n".join(HELP_TEXT.values())

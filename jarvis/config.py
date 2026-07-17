@@ -272,6 +272,25 @@ DISCORD_ALLOWED_CHANNEL_IDS: set[int] = {
     int(cid) for cid in os.environ.get("DISCORD_CHANNEL_ID", "").split(",") if cid.strip()
 }
 
+# ---------------------------------------------------------------------------
+# Email watcher (IMAP inbox → cross-platform broadcast via notifier.broadcast)
+# ---------------------------------------------------------------------------
+
+# IMAP host, e.g. imap.gmail.com. Leave unset (default) to disable email
+# watching entirely — modules/email_watcher.py no-ops until this is set.
+EMAIL_IMAP_HOST: str = os.environ.get("EMAIL_IMAP_HOST", "")
+EMAIL_IMAP_PORT: int = int(os.environ.get("EMAIL_IMAP_PORT", "993"))
+
+# Mailbox address + password — never hardcode, always read from the
+# environment. For Gmail/most providers with 2FA enabled, this must be an
+# App Password (Google Account → Security → App passwords), not your normal
+# login password.
+EMAIL_ADDRESS: str = os.environ.get("EMAIL_ADDRESS", "")
+EMAIL_PASSWORD: str = os.environ.get("EMAIL_PASSWORD", "")
+
+# IMAP folder to watch.
+EMAIL_FOLDER: str = os.environ.get("EMAIL_FOLDER", "INBOX")
+
 
 # ---------------------------------------------------------------------------
 # Validation helper
