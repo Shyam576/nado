@@ -4,15 +4,29 @@ bot/notifier.py — Cross-platform delivery for proactive messages.
 Background jobs (reminders, price alerts, daily digest, ...) don't know or
 care which chat platform(s) are actually running — they just call
 notifier.broadcast(text) and it fans out to every configured, allowlisted
-recipient across Telegram and Discord. Each transport registers itself here
-once it's started; a transport that never registers is simply skipped.
+recipient across Telegram and Discord, plus a native desktop notification on
+the machine the bot runs on. Each transport registers itself here once it's
+started; a transport that never registers is simply skipped.
 """
 
+import asyncio
 import logging
 
 from config import DISCORD_ALLOWED_CHANNEL_IDS, TELEGRAM_ALLOWED_CHAT_IDS
 
 logger = logging.getLogger(__name__)
+
+_DESKTOP_NOTIFICATION_MAX_CHARS = 220  # macOS truncates long bodies anyway
+
+
+def _show_desktop_notification(text: str) -> None:
+    """Best-effort native desktop notification (runs in a worker thread)."""
+    import actions  # local import — actions.py pulls in pyautogui
+
+    body = text if len(text) <= _DESKTOP_NOTIFICATION_MAX_CHARS else (
+        text[:_DESKTOP_NOTIFICATION_MAX_CHARS] + "…"
+    )
+    actions.show_notification("Jarvis", body)
 
 _telegram_bot = None  # a telegram.Bot (or Application.bot), set by telegram_bot.run()
 _discord_client = None  # a discord.Client, set by discord_bot.run()
@@ -52,3 +66,8 @@ async def broadcast(text: str) -> None:
                 await channel.send(text)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Discord broadcast failed for channel_id=%s: %s", channel_id, exc)
+
+    try:
+        await asyncio.to_thread(_show_desktop_notification, text)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Desktop notification failed: %s", exc)

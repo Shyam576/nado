@@ -149,14 +149,23 @@ _WINDOWS_APP_MAP: dict[str, str] = {
 }
 
 
-def _open_app_macos(app_name: str) -> None:
+def _open_app_macos(app_name: str) -> Optional[str]:
     """Launch a macOS application by its bundle name.
 
     Args:
         app_name: The display name of the application (e.g. "Spotify").
+
+    Returns:
+        None on success, or an error description if the app could not be
+        opened (e.g. it is not installed).
     """
     resolved = _MACOS_APP_MAP.get(app_name.lower(), app_name)
-    subprocess.Popen(["open", "-a", resolved])
+    result = subprocess.run(
+        ["open", "-a", resolved], capture_output=True, text=True, timeout=10
+    )
+    if result.returncode != 0:
+        return result.stderr.strip() or f"Could not open '{app_name}'."
+    return None
 
 
 def _open_app_windows(app_name: str) -> None:
@@ -194,7 +203,10 @@ def open_app(app: str) -> str:
     """
     logger.info("Action: open_app('%s')", app)
     if sys.platform == "darwin":
-        _open_app_macos(app)
+        error = _open_app_macos(app)
+        if error:
+            logger.warning("open_app failed: %s", error)
+            return f"Couldn't open {app} — {error}"
     elif sys.platform == "win32":
         _open_app_windows(app)
     else:
@@ -279,11 +291,16 @@ def take_screenshot() -> str:
     return str(save_path)
 
 
-def run_command(cmd: str) -> str:
-    """Execute a shell command and return its stdout (truncated to 200 chars).
+def run_command(cmd: str, max_chars: int = 200, cwd: Optional[str] = None) -> str:
+    """Execute a shell command and return its stdout (truncated).
 
     Args:
         cmd: The shell command string to execute.
+        max_chars: Truncation limit for the output. The 200 default suits the
+                   spoken voice pipeline; chat transports pass a larger limit.
+        cwd: Working directory for the command. None keeps the process cwd
+             (voice-mode behaviour); chat transports pass the home directory
+             so relative paths like "Desktop" resolve intuitively.
 
     Returns:
         The command's stdout (or a short error description on failure).
@@ -295,9 +312,10 @@ def run_command(cmd: str) -> str:
         capture_output=True,
         text=True,
         timeout=30,
+        cwd=cwd,
     )
     output = result.stdout.strip() or result.stderr.strip() or "(no output)"
-    truncated = output[:200] + ("…" if len(output) > 200 else "")
+    truncated = output[:max_chars] + ("…" if len(output) > max_chars else "")
     logger.debug("Command output: %s", truncated)
     return truncated
 

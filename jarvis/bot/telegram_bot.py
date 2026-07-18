@@ -60,10 +60,13 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     text = message.text.strip()
     logger.info("Received from chat_id=%s: %s", chat_id, text)
 
+    image_path = None
     try:
         reply = dispatch(OWNER_ID, text)
         if reply is None:
-            reply = intent.route(OWNER_ID, text)
+            routed = intent.route(OWNER_ID, text)
+            if routed is not None:
+                reply, image_path = routed.text, routed.image_path
         if reply is None:
             reply = ask(text)
     except Exception as exc:  # noqa: BLE001
@@ -71,7 +74,11 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         reply = "Something went wrong on my end. Give me a moment and try again."
 
     try:
-        await message.reply_text(reply)
+        if image_path:
+            with open(image_path, "rb") as photo:
+                await message.reply_photo(photo=photo, caption=reply)
+        else:
+            await message.reply_text(reply)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to send reply (len=%d): %s", len(reply), exc)
         await message.reply_text("Something went wrong sending that reply.")
@@ -138,9 +145,12 @@ async def _handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await message.reply_text("Couldn't make out any speech in that — try again?")
             return
 
+        image_path = None
         reply = dispatch(OWNER_ID, transcript)
         if reply is None:
-            reply = intent.route(OWNER_ID, transcript)
+            routed = intent.route(OWNER_ID, transcript)
+            if routed is not None:
+                reply, image_path = routed.text, routed.image_path
         if reply is None:
             reply = ask(transcript)
     except Exception as exc:  # noqa: BLE001
@@ -149,7 +159,12 @@ async def _handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     try:
-        await message.reply_text(f"Heard: “{transcript}”\n\n{reply}")
+        text_reply = f"Heard: “{transcript}”\n\n{reply}"
+        if image_path:
+            with open(image_path, "rb") as photo:
+                await message.reply_photo(photo=photo, caption=text_reply)
+        else:
+            await message.reply_text(text_reply)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to send voice reply: %s", exc)
 

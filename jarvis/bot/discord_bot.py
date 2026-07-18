@@ -95,9 +95,12 @@ async def _handle_voice_attachment(message: discord.Message, attachment: discord
             await message.channel.send("Couldn't make out any speech in that — try again?")
             return
 
+        image_path = None
         reply = dispatch(OWNER_ID, transcript)
         if reply is None:
-            reply = intent.route(OWNER_ID, transcript)
+            routed = intent.route(OWNER_ID, transcript)
+            if routed is not None:
+                reply, image_path = routed.text, routed.image_path
         if reply is None:
             reply = ask(transcript)
     except Exception as exc:  # noqa: BLE001
@@ -106,7 +109,11 @@ async def _handle_voice_attachment(message: discord.Message, attachment: discord
         return
 
     try:
-        for chunk in _chunk(f"Heard: “{transcript}”\n\n{reply}"):
+        chunks = _chunk(f"Heard: “{transcript}”\n\n{reply}")
+        if image_path:
+            await message.channel.send(chunks[0], file=discord.File(image_path))
+            chunks = chunks[1:]
+        for chunk in chunks:
             await message.channel.send(chunk)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to send Discord voice reply: %s", exc)
@@ -144,10 +151,13 @@ async def _process_message(message: discord.Message, client_user) -> None:
 
     logger.info("Received from Discord channel_id=%s: %s", message.channel.id, text)
 
+    image_path = None
     try:
         reply = dispatch(OWNER_ID, text)
         if reply is None:
-            reply = intent.route(OWNER_ID, text)
+            routed = intent.route(OWNER_ID, text)
+            if routed is not None:
+                reply, image_path = routed.text, routed.image_path
         if reply is None:
             reply = ask(text)
     except Exception as exc:  # noqa: BLE001
@@ -155,7 +165,11 @@ async def _process_message(message: discord.Message, client_user) -> None:
         reply = "Something went wrong on my end. Give me a moment and try again."
 
     try:
-        for chunk in _chunk(reply):
+        chunks = _chunk(reply)
+        if image_path:
+            await message.channel.send(chunks[0], file=discord.File(image_path))
+            chunks = chunks[1:]
+        for chunk in chunks:
             await message.channel.send(chunk)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to send Discord reply (len=%d): %s", len(reply), exc)
