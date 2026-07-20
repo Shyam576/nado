@@ -8,7 +8,19 @@ through to the LLM chat path in bot/telegram_bot.py.
 
 from typing import Callable
 
-from modules import communication, decision, devops, digest, email_watcher, expenses, finance, habits, tasks
+from modules import (
+    communication,
+    decision,
+    devops,
+    digest,
+    email_watcher,
+    expenses,
+    finance,
+    habits,
+    projects,
+    system,
+    tasks,
+)
 
 NOT_IMPLEMENTED = "Not implemented yet — coming in a later build step."
 
@@ -85,6 +97,10 @@ HELP_TEXT: dict[str, str] = {
     "/tasks": "/tasks [add <title> | done <id>] — list, add, or complete tasks",
     "/remind": "/remind <minutes> <message> — schedule a one-off reminder",
     "/status": "/status [namespace] — Kubernetes pod health, grouped by deployment",
+    "/system": "/system — laptop stats: CPU, RAM, disk, battery, uptime",
+    "/lock": "/lock — lock the laptop screen",
+    "/project": "/project <name> — git branch, last commit, dirty files, containers for a repo",
+    "/cleanup": "/cleanup — sort loose files in ~/Downloads into subfolders (move-only)",
     "/logs": "/logs <service> [namespace] | /logs summary <service> — raw tail, or an LLM summary",
     "/gold": "/gold [target <price> | target clear] — gold spot price / alert target",
     "/ter": "/ter [usd|inr|btn|all] [target buy|sell <price> | target clear] — TER price / alerts",
@@ -110,6 +126,10 @@ COMMANDS: dict[str, Callable[[str, list[str]], str]] = {
     "/tasks": _handle_tasks,
     "/remind": lambda chat_id, args: tasks.add_reminder(chat_id, args),
     "/status": lambda chat_id, args: devops.k8s_health(chat_id, args),
+    "/system": lambda chat_id, args: system.system_status(chat_id, args),
+    "/lock": lambda chat_id, args: system.lock_screen(chat_id, args),
+    "/project": lambda chat_id, args: projects.project_status(chat_id, args),
+    "/cleanup": lambda chat_id, args: system.cleanup_downloads(chat_id, args),
     "/gold": lambda chat_id, args: finance.gold_price(chat_id, args),
     "/ter": _handle_ter,
     "/logs": _handle_logs,

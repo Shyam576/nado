@@ -266,10 +266,18 @@ TELEGRAM_ALLOWED_CHAT_IDS: set[int] = {
 DISCORD_BOT_TOKEN: str = os.environ.get("DISCORD_TOKEN", "")
 
 # Allowlist of Discord channel IDs the bot will respond in — same auth-boundary
-# role as TELEGRAM_ALLOWED_CHAT_IDS. Messages from any other channel (or from
-# other users in an allowed channel) are ignored. Comma-separated for multiple.
+# role as TELEGRAM_ALLOWED_CHAT_IDS. Messages from any other channel are
+# ignored. Comma-separated for multiple.
 DISCORD_ALLOWED_CHANNEL_IDS: set[int] = {
     int(cid) for cid in os.environ.get("DISCORD_CHANNEL_ID", "").split(",") if cid.strip()
+}
+
+# Allowlist of Discord user IDs whose messages are processed. Channel checks
+# alone are not enough: anyone who can post in an allowed channel (new server
+# members, webhooks, other bots) would otherwise get shell-level access via
+# the laptop actions. Both checks must pass. Comma-separated for multiple.
+DISCORD_ALLOWED_USER_IDS: set[int] = {
+    int(uid) for uid in os.environ.get("DISCORD_ALLOWED_USER_IDS", "").split(",") if uid.strip()
 }
 
 # ---------------------------------------------------------------------------
@@ -335,5 +343,10 @@ def validate_bot_config() -> list[str]:
     if not DISCORD_ALLOWED_CHANNEL_IDS:
         warnings.append(
             "DISCORD_CHANNEL_ID is empty — the Discord transport will ignore every message."
+        )
+    if not DISCORD_ALLOWED_USER_IDS:
+        warnings.append(
+            "DISCORD_ALLOWED_USER_IDS is empty — the Discord transport will ignore every message. "
+            "Set it to your own Discord user ID (right-click your name → Copy User ID)."
         )
     return warnings

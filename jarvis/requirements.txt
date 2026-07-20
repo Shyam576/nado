@@ -45,3 +45,4 @@ python-telegram-bot[job-queue]>=21.0
 discord.py>=2.3.0      # Discord bot transport (runs alongside Telegram in bot mode)
 pytesseract>=0.3.10     # OCR for payment-screenshot expense tracking (requires `brew install tesseract`)
 python-dotenv>=1.0.0   # loads TELEGRAM_BOT_TOKEN / JARVIS_ALLOWED_CHAT_IDS from .env
+psutil>=7.0.0           # /system laptop stats: CPU, RAM, disk, battery, uptime

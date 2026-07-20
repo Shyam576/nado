@@ -45,6 +45,9 @@ logging.basicConfig(
     format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
     datefmt="%H:%M:%S",
 )
+# httpx logs every request URL at INFO — for Telegram that URL contains the
+# bot token, which must never be written to logs. WARNING keeps real errors.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 

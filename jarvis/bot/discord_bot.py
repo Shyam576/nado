@@ -28,7 +28,12 @@ import memory
 from bot import notifier
 from bot.commands import dispatch
 from brain import ask
-from config import DISCORD_ALLOWED_CHANNEL_IDS, DISCORD_BOT_TOKEN, OWNER_ID
+from config import (
+    DISCORD_ALLOWED_CHANNEL_IDS,
+    DISCORD_ALLOWED_USER_IDS,
+    DISCORD_BOT_TOKEN,
+    OWNER_ID,
+)
 from modules import expenses, intent, transcription
 
 logger = logging.getLogger(__name__)
@@ -129,6 +134,15 @@ async def _process_message(message: discord.Message, client_user) -> None:
     if message.author == client_user:
         return
     if message.channel.id not in DISCORD_ALLOWED_CHANNEL_IDS:
+        return
+    if message.author.id not in DISCORD_ALLOWED_USER_IDS:
+        # Channel allowlisting alone is not authentication — any server member,
+        # webhook, or bot posting in the channel would otherwise reach the
+        # laptop actions. Silently ignore non-owners.
+        logger.warning(
+            "Ignored message from unauthorised Discord user_id=%s in channel_id=%s",
+            message.author.id, message.channel.id,
+        )
         return
 
     image_attachments = [
