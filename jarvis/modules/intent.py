@@ -141,6 +141,9 @@ Intents and their required fields:
   {"intent": "list_tasks"}
   {"intent": "complete_task", "task_id": <number>}
   {"intent": "set_reminder", "minutes": <number>, "message": "<reminder text>"}
+  {"intent": "set_daily_reminder", "hour": <0-23>, "minute": <0-59>, "message": "<reminder text>"}
+  {"intent": "daily_reminder_status"}
+  {"intent": "cancel_daily_reminder"}
   {"intent": "budget_status"}
   {"intent": "list_expenses"}
   {"intent": "daily_summary"}
@@ -162,7 +165,9 @@ Intents and their required fields:
 Rules:
 - "chat" is for greetings, questions, opinions, and anything that is not one of the actions above.
 - Only pick an action intent when the message clearly asks for that action.
-- Convert hours to minutes for reminders.
+- Convert hours to minutes for one-off reminders (set_reminder).
+- "remind me every day"/"daily"/"each day" at a clock time -> set_daily_reminder, with hour in 24-hour format (e.g. "11am" -> 11, "2:30pm" -> 14 and minute 30). A one-off "in N minutes/hours" -> set_reminder instead.
+- Setting a new daily reminder always replaces the previous one — there is only ever one active at a time.
 - Never invent an amount, task id, or reminder time that is not in the message.
 - The laptop actions (screenshot, open_app, run_command, clipboard, play_media) run on the user's own computer.
 - In run_command, always write paths as absolute or ~-relative (e.g. ~/Desktop), never bare relative names.
@@ -176,6 +181,11 @@ Examples:
 "mark task 3 as done" -> {"intent": "complete_task", "task_id": 3}
 "finished task 3" -> {"intent": "complete_task", "task_id": 3}
 "remind me in an hour to stretch" -> {"intent": "set_reminder", "minutes": 60, "message": "stretch"}
+"remind me every day at 11am to make an identity resolver for PII" -> {"intent": "set_daily_reminder", "hour": 11, "minute": 0, "message": "make an identity resolver for PII"}
+"send me a daily reminder at 2:30pm to stretch" -> {"intent": "set_daily_reminder", "hour": 14, "minute": 30, "message": "stretch"}
+"what's my daily reminder" -> {"intent": "daily_reminder_status"}
+"stop my daily reminder" -> {"intent": "cancel_daily_reminder"}
+"cancel the daily reminder" -> {"intent": "cancel_daily_reminder"}
 "what's the gold rate" -> {"intent": "gold_price"}
 "open spotify" -> {"intent": "open_app", "app": "Spotify"}
 "show me what's on my screen" -> {"intent": "take_screenshot"}
@@ -254,6 +264,14 @@ def _dispatch_set_reminder(chat_id: str, data: dict) -> Optional[IntentReply]:
     return IntentReply(tasks.add_reminder(chat_id, [str(minutes)] + message.split()))
 
 
+def _dispatch_set_daily_reminder(chat_id: str, data: dict) -> Optional[IntentReply]:
+    hour, minute = data.get("hour"), data.get("minute", 0)
+    message = str(data.get("message", "")).strip()
+    if not isinstance(hour, int) or not isinstance(minute, int) or not message:
+        return None
+    return IntentReply(tasks.add_daily_reminder(chat_id, hour, minute, message))
+
+
 # --- Laptop actions (actions.py imported lazily — it pulls in pyautogui) ---
 
 
@@ -329,6 +347,9 @@ _DISPATCH: dict[str, Callable[[str, dict], Optional[IntentReply]]] = {
     "add_task": _dispatch_add_task,
     "complete_task": _dispatch_complete_task,
     "set_reminder": _dispatch_set_reminder,
+    "set_daily_reminder": _dispatch_set_daily_reminder,
+    "daily_reminder_status": _text_handler(tasks.daily_reminder_status),
+    "cancel_daily_reminder": _text_handler(tasks.cancel_daily_reminder),
     "list_tasks": _text_handler(tasks.list_tasks),
     "budget_status": _text_handler(expenses.budget_status),
     "list_expenses": lambda chat_id, data: IntentReply(expenses.list_expenses(chat_id, [])),

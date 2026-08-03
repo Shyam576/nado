@@ -91,11 +91,35 @@ def _handle_tasks(chat_id: str, args: list[str]) -> str:
     return "Usage: /tasks [add <title> | done <id>]"
 
 
+def _handle_daily_reminder(chat_id: str, args: list[str]) -> str:
+    """Route /dailyremind subcommands: <HH:MM> <message> (set/replace), status, or cancel."""
+    if not args:
+        return "Usage: /dailyremind <HH:MM> <message> | status | cancel"
+
+    sub = args[0].lower()
+    if sub == "status":
+        return tasks.daily_reminder_status(chat_id)
+    if sub == "cancel":
+        return tasks.cancel_daily_reminder(chat_id)
+
+    time_str, rest = args[0], args[1:]
+    if ":" not in time_str or not rest:
+        return "Usage: /dailyremind <HH:MM> <message> | status | cancel"
+    try:
+        hour_str, minute_str = time_str.split(":", 1)
+        hour, minute = int(hour_str), int(minute_str)
+    except ValueError:
+        return "Usage: /dailyremind <HH:MM> <message> | status | cancel"
+
+    return tasks.add_daily_reminder(chat_id, hour, minute, " ".join(rest))
+
+
 # Order here is also the order /help displays them in.
 HELP_TEXT: dict[str, str] = {
     "/today": "/today — pending task count + reminders due today",
     "/tasks": "/tasks [add <title> | done <id>] — list, add, or complete tasks",
     "/remind": "/remind <minutes> <message> — schedule a one-off reminder",
+    "/dailyremind": "/dailyremind <HH:MM> <message> | status | cancel — recurring daily reminder (replaces the previous one)",
     "/status": "/status [namespace] — Kubernetes pod health, grouped by deployment",
     "/system": "/system — laptop stats: CPU, RAM, disk, battery, uptime",
     "/lock": "/lock — lock the laptop screen",
@@ -125,6 +149,7 @@ COMMANDS: dict[str, Callable[[str, list[str]], str]] = {
     "/today": lambda chat_id, args: tasks.today_summary(chat_id),
     "/tasks": _handle_tasks,
     "/remind": lambda chat_id, args: tasks.add_reminder(chat_id, args),
+    "/dailyremind": _handle_daily_reminder,
     "/status": lambda chat_id, args: devops.k8s_health(chat_id, args),
     "/system": lambda chat_id, args: system.system_status(chat_id, args),
     "/lock": lambda chat_id, args: system.lock_screen(chat_id, args),

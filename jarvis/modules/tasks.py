@@ -186,6 +186,134 @@ def weekly_stats(chat_id: str) -> dict:
     }
 
 
+def _format_time(hour: int, minute: int) -> str:
+    """Format an hour/minute pair as e.g. '11:00 AM'."""
+    return datetime.time(hour, minute).strftime("%-I:%M %p")
+
+
+def add_daily_reminder(chat_id: str, hour: int, minute: int, message: str) -> str:
+    """Set (or replace) this chat's recurring daily reminder.
+
+    Only one daily reminder is active per chat at a time — adding a new one
+    while an enabled reminder exists replaces its time and message rather
+    than creating a second one, matching "a daily reminder ... unless I
+    change it" (one thing you adjust, not a growing list).
+
+    Args:
+        chat_id: The owner this reminder belongs to.
+        hour: 24-hour clock hour (0-23).
+        minute: Minute (0-59).
+        message: The text to send each day.
+
+    Returns:
+        A confirmation string.
+    """
+    if not (0 <= hour <= 23 and 0 <= minute <= 59) or not message.strip():
+        return "Usage: daily reminder needs a valid time and a message."
+
+    now = datetime.datetime.now().isoformat()
+    with get_connection() as conn:
+        existing = conn.execute(
+            "SELECT id FROM daily_reminders WHERE chat_id = ? AND enabled = 1",
+            (chat_id,),
+        ).fetchone()
+
+        if existing:
+            conn.execute(
+                "UPDATE daily_reminders SET message = ?, hour = ?, minute = ?, "
+                "last_fired_date = NULL WHERE id = ?",
+                (message, hour, minute, existing["id"]),
+            )
+            return (
+                f"Updated your daily reminder — now at {_format_time(hour, minute)}: {message}"
+            )
+
+        conn.execute(
+            "INSERT INTO daily_reminders (chat_id, message, hour, minute, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (chat_id, message, hour, minute, now),
+        )
+    return f"Daily reminder set for {_format_time(hour, minute)}: {message}"
+
+
+def cancel_daily_reminder(chat_id: str) -> str:
+    """Disable this chat's active daily reminder, if any.
+
+    Args:
+        chat_id: The owner whose daily reminder should be cancelled.
+
+    Returns:
+        A confirmation, or a message noting there was nothing to cancel.
+    """
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE daily_reminders SET enabled = 0 WHERE chat_id = ? AND enabled = 1",
+            (chat_id,),
+        )
+    if cursor.rowcount == 0:
+        return "You don't have an active daily reminder."
+    return "Daily reminder cancelled."
+
+
+def daily_reminder_status(chat_id: str) -> str:
+    """Describe this chat's active daily reminder, if any.
+
+    Args:
+        chat_id: The owner to look up.
+
+    Returns:
+        A description of the current daily reminder, or a message noting
+        none is set.
+    """
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT message, hour, minute FROM daily_reminders WHERE chat_id = ? AND enabled = 1",
+            (chat_id,),
+        ).fetchone()
+
+    if row is None:
+        return "No daily reminder set."
+    return f"Daily reminder at {_format_time(row['hour'], row['minute'])}: {row['message']}"
+
+
+def get_due_daily_reminders() -> list[dict]:
+    """Return all enabled daily reminders due to fire and not yet sent today.
+
+    A reminder is due once the current time has reached its configured
+    hour:minute and it has not already been marked delivered for today's
+    date — so a bot restart after the target time still delivers it once
+    (late), rather than silently skipping the day.
+
+    Returns:
+        A list of dicts with keys: id, chat_id, message.
+    """
+    now = datetime.datetime.now()
+    today = now.date().isoformat()
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, chat_id, message FROM daily_reminders "
+            "WHERE enabled = 1 "
+            "AND (last_fired_date IS NULL OR last_fired_date < ?) "
+            "AND (hour < ? OR (hour = ? AND minute <= ?))",
+            (today, now.hour, now.hour, now.minute),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def mark_daily_reminder_fired(reminder_id: int) -> None:
+    """Record today as the last-fired date for a daily reminder.
+
+    Args:
+        reminder_id: The ID of the daily_reminders row to mark.
+    """
+    today = datetime.date.today().isoformat()
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE daily_reminders SET last_fired_date = ? WHERE id = ?",
+            (today, reminder_id),
+        )
+
+
 def get_due_reminders() -> list[dict]:
     """Return all undelivered reminders whose fire time has passed.
 

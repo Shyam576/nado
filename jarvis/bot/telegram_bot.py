@@ -35,6 +35,7 @@ from modules import digest, email_watcher, expenses, finance, habits, intent, nu
 logger = logging.getLogger(__name__)
 
 REMINDER_POLL_SECONDS = 30
+DAILY_REMINDER_POLL_SECONDS = 60  # minute-granularity is enough for "around HH:MM"
 GOLD_TARGET_POLL_SECONDS = 300
 HABIT_GAP_POLL_SECONDS = 21600  # 6 hours — a daily-cadence check doesn't need finer polling
 PRICE_SNAPSHOT_POLL_SECONDS = 3600  # hourly — gives digest.py a same-day-granularity baseline
@@ -179,6 +180,16 @@ async def _deliver_due_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.exception("Failed to deliver reminder id=%s: %s", reminder["id"], exc)
 
 
+async def _deliver_due_daily_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job-queue callback: broadcast any recurring daily reminders due today."""
+    for reminder in tasks.get_due_daily_reminders():
+        try:
+            await notifier.broadcast(f"Daily reminder: {reminder['message']}")
+            tasks.mark_daily_reminder_fired(reminder["id"])
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to deliver daily reminder id=%s: %s", reminder["id"], exc)
+
+
 async def _check_gold_target(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Job-queue callback: broadcast if the stored gold price target has been reached."""
     alert = finance.check_price_target()
@@ -259,6 +270,11 @@ def build_application() -> Application:
     application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, _handle_voice))
     application.job_queue.run_repeating(
         _deliver_due_reminders, interval=REMINDER_POLL_SECONDS, first=REMINDER_POLL_SECONDS
+    )
+    application.job_queue.run_repeating(
+        _deliver_due_daily_reminders,
+        interval=DAILY_REMINDER_POLL_SECONDS,
+        first=DAILY_REMINDER_POLL_SECONDS,
     )
     application.job_queue.run_repeating(
         _check_gold_target, interval=GOLD_TARGET_POLL_SECONDS, first=GOLD_TARGET_POLL_SECONDS
