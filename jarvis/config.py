@@ -280,6 +280,16 @@ DISCORD_ALLOWED_USER_IDS: set[int] = {
     int(uid) for uid in os.environ.get("DISCORD_ALLOWED_USER_IDS", "").split(",") if uid.strip()
 }
 
+# Discord webhook IDs trusted to auto-log expenses from an uploaded image (e.g.
+# a phone Shortcuts automation posting banking-app screenshots). Deliberately a
+# SEPARATE, narrower trust tier from DISCORD_ALLOWED_USER_IDS: a message from a
+# trusted webhook is routed only to the receipt-OCR expense path — never to
+# command dispatch, intent routing (which can run shell commands), or chat.
+# Empty by default — the feature is inert until explicitly configured.
+DISCORD_TRUSTED_WEBHOOK_IDS: set[int] = {
+    int(wid) for wid in os.environ.get("DISCORD_TRUSTED_WEBHOOK_IDS", "").split(",") if wid.strip()
+}
+
 # ---------------------------------------------------------------------------
 # Email watcher (IMAP inbox → cross-platform broadcast via notifier.broadcast)
 # ---------------------------------------------------------------------------

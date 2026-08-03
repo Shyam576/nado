@@ -32,6 +32,7 @@ from config import (
     DISCORD_ALLOWED_CHANNEL_IDS,
     DISCORD_ALLOWED_USER_IDS,
     DISCORD_BOT_TOKEN,
+    DISCORD_TRUSTED_WEBHOOK_IDS,
     OWNER_ID,
 )
 from modules import expenses, intent, transcription
@@ -135,6 +136,23 @@ async def _process_message(message: discord.Message, client_user) -> None:
         return
     if message.channel.id not in DISCORD_ALLOWED_CHANNEL_IDS:
         return
+
+    if message.webhook_id is not None and message.webhook_id in DISCORD_TRUSTED_WEBHOOK_IDS:
+        # A trusted webhook (e.g. a phone Shortcuts automation posting banking
+        # screenshots) gets a narrower trust tier than the personal-user
+        # check below: image-only receipt OCR, never command dispatch, intent
+        # routing, or chat — so a leaked webhook URL can log a bogus expense
+        # at worst, not run a shell command or open an app.
+        image_attachments = [
+            a for a in message.attachments if (a.content_type or "").startswith("image/")
+        ]
+        if image_attachments:
+            logger.info(
+                "Processing trusted-webhook image upload, webhook_id=%s", message.webhook_id
+            )
+            await _handle_receipt_image(message, image_attachments[0])
+        return
+
     if message.author.id not in DISCORD_ALLOWED_USER_IDS:
         # Channel allowlisting alone is not authentication — any server member,
         # webhook, or bot posting in the channel would otherwise reach the
