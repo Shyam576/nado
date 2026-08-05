@@ -104,6 +104,34 @@ def weekly_mood_entries(chat_id: str) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def weekly_habit_adherence(chat_id: str) -> list[dict]:
+    """Return each tracked habit's completion count over the last 7 days.
+
+    Args:
+        chat_id: The chat to compute adherence for.
+
+    Returns:
+        A list of dicts with keys: habit, days_logged (0-7), sorted by habit name.
+    """
+    week_ago = (datetime.datetime.now() - datetime.timedelta(days=7)).isoformat()
+    with get_connection() as conn:
+        habit_names = [
+            row["habit"]
+            for row in conn.execute(
+                "SELECT DISTINCT habit FROM habit_log WHERE chat_id = ? ORDER BY habit", (chat_id,)
+            ).fetchall()
+        ]
+        results = []
+        for habit in habit_names:
+            days_logged = conn.execute(
+                "SELECT COUNT(DISTINCT date(completed_at)) FROM habit_log "
+                "WHERE chat_id = ? AND habit = ? AND completed_at >= ?",
+                (chat_id, habit, week_ago),
+            ).fetchone()[0]
+            results.append({"habit": habit, "days_logged": days_logged})
+    return results
+
+
 def log_habit(chat_id: str = "", args: list[str] | None = None) -> str:
     """Log today's completion of a habit (idempotent — one log per day).
 

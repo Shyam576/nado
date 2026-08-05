@@ -124,6 +124,28 @@ def add_reminder(chat_id: str, args: list[str]) -> str:
     return f"Reminder set for {minutes} minute{'s' if minutes != 1 else ''} from now: {message}"
 
 
+def find_pending_tasks_matching(chat_id: str, keyword: str) -> list[dict]:
+    """Return pending tasks whose title contains keyword (case-insensitive).
+
+    Used to correlate other modules' alerts (e.g. a price target being hit)
+    with a task the user already logged about the same thing.
+
+    Args:
+        chat_id: The chat whose tasks to search.
+        keyword: Substring to match against task titles, e.g. "gold".
+
+    Returns:
+        A list of dicts with keys: id, title, created_at.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, title, created_at FROM tasks "
+            "WHERE chat_id = ? AND status = 'pending' AND title LIKE ? ORDER BY created_at",
+            (chat_id, f"%{keyword}%"),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def today_summary(chat_id: str) -> str:
     """Return a plain-text summary of pending tasks and upcoming reminders.
 

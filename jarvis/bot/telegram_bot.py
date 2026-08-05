@@ -194,12 +194,14 @@ async def _check_gold_target(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Job-queue callback: broadcast if the stored gold price target has been reached."""
     alert = finance.check_price_target()
     if alert:
+        alert += nudges.related_task_note(OWNER_ID, "gold")
         await notifier.broadcast(alert)
 
 
 async def _check_ter_targets(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Job-queue callback: broadcast on any reached TER buy/sell price targets."""
     for alert in finance.check_ter_targets():
+        alert += nudges.related_task_note(OWNER_ID, "ter")
         await notifier.broadcast(alert)
 
 

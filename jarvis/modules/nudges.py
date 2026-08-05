@@ -17,6 +17,7 @@ import datetime
 import logging
 
 import memory
+from modules import tasks
 from store.db import get_connection
 
 logger = logging.getLogger(__name__)
@@ -98,6 +99,33 @@ def evening_expense_nudge(chat_id: str) -> str | None:
     if count > 0:
         return None
     return "No expenses logged today — nothing spent, or just forgot? A quick “spent 100 on …” keeps the budget honest."
+
+
+def related_task_note(chat_id: str, keyword: str) -> str:
+    """Return a note about pending tasks matching keyword, to append to another alert.
+
+    Lets a price-target alert (or any other module's alert) surface a task the
+    user already logged about the same thing, e.g. a gold-price alert
+    mentioning a still-open "sell gold before Diwali" task — otherwise the two
+    live as separate, disconnected messages even though they're about the
+    same thing.
+
+    Args:
+        chat_id: The chat whose tasks to check.
+        keyword: Substring to match against task titles, e.g. "gold".
+
+    Returns:
+        A "\n\nRelated open task(s):..." suffix, or "" if nothing matches.
+    """
+    matches = tasks.find_pending_tasks_matching(chat_id, keyword)
+    if not matches:
+        return ""
+
+    lines = ["Related open task(s):"]
+    for row in matches:
+        age_days = (datetime.datetime.now() - datetime.datetime.fromisoformat(row["created_at"])).days
+        lines.append(f"  #{row['id']} {row['title']} ({age_days}d old)")
+    return "\n\n" + "\n".join(lines)
 
 
 def stale_task_nudge(chat_id: str) -> str | None:

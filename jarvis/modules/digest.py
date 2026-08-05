@@ -16,11 +16,12 @@ logger = logging.getLogger(__name__)
 
 _WEEKLY_REVIEW_SYSTEM = (
     "You are Jarvis's weekly-review brain. Given the user's last 7 days of tasks "
-    "completed, mood entries, and expenses by category, write a short (3-5 sentence) "
-    "reflective summary. Point out genuine patterns you can see in the data (e.g. "
-    "spending spikes in a category, mood trends, low task throughput) — don't just "
-    "restate the numbers. If the data is too sparse to say anything meaningful, say "
-    "so plainly rather than inventing a pattern. Plain text only, no markdown."
+    "completed, mood entries, habit adherence, and expenses by category, write a short "
+    "(3-5 sentence) reflective summary. Point out genuine patterns you can see in the data "
+    "(e.g. spending spikes in a category, mood trends, low task throughput, a habit lapse "
+    "coinciding with a mood dip) — don't just restate the numbers. If the data is too sparse "
+    "to say anything meaningful, say so plainly rather than inventing a pattern. Plain text "
+    "only, no markdown."
 )
 
 
@@ -65,6 +66,7 @@ def build_weekly_review(chat_id: str = "", args: list[str] | None = None) -> str
     """
     task_stats = tasks.weekly_stats(chat_id)
     mood_entries = habits.weekly_mood_entries(chat_id)
+    habit_adherence = habits.weekly_habit_adherence(chat_id)
     expense_stats = expenses.weekly_expense_summary(chat_id)
 
     context_lines = [
@@ -82,6 +84,12 @@ def build_weekly_review(chat_id: str = "", args: list[str] | None = None) -> str
         context_lines.append(f"Mood entries this week: {mood_line}")
     else:
         context_lines.append("No mood entries logged this week.")
+
+    if habit_adherence:
+        habit_line = ", ".join(f"{h['habit']}: {h['days_logged']}/7 days" for h in habit_adherence)
+        context_lines.append(f"Habit adherence this week: {habit_line}")
+    else:
+        context_lines.append("No habits tracked this week.")
 
     if expense_stats["total"]:
         cat_line = ", ".join(f"{k}: {v:,.2f}" for k, v in expense_stats["by_category"].items())
