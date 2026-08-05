@@ -21,6 +21,7 @@ import urllib.parse
 import urllib.request
 from typing import Optional
 
+import memory
 from config import (
     GRAFANA_API_TOKEN,
     GRAFANA_URL,
@@ -28,6 +29,7 @@ from config import (
     LOKI_DATASOURCE_UID,
     PROMETHEUS_DATASOURCE_UID,
 )
+from modules import tasks
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,11 @@ _REQUEST_TIMEOUT_SECONDS = 15
 _LOG_LOOKBACK_SECONDS = 24 * 3600
 _MAX_LINE_CHARS = 300  # some app logs (e.g. raw SQL dumps) are absurdly long on their own
 _MAX_REPLY_CHARS = 3500  # Telegram caps messages at 4096; leave headroom
+
+# Re-alert (and consider a fresh task) for a still-unhealthy deployment at
+# most this often — avoids re-notifying and re-tasking on every poll while
+# an issue is already known and presumably being worked.
+_UNHEALTHY_REALERT_SECONDS = 6 * 3600
 
 # Strips the ReplicaSet-hash and pod-suffix segments off a pod name, e.g.
 # "admin-auth-service-85f87894c8-5bwft" -> "admin-auth-service"
@@ -76,6 +83,33 @@ def _deployment_name(pod_name: str) -> str:
     return _POD_SUFFIX_RE.sub("", pod_name)
 
 
+def _pod_status_by_deployment(namespace: str) -> Optional[dict[str, "collections.Counter"]]:
+    """Query Prometheus for pod phases in `namespace`, grouped by deployment.
+
+    Returns:
+        A dict of deployment name -> Counter({phase: count}), or None if the
+        query couldn't be made (missing config or request failure). An empty
+        dict means the query succeeded but found no pods.
+    """
+    if not PROMETHEUS_DATASOURCE_UID:
+        return None
+
+    data = _grafana_get(
+        f"/api/datasources/proxy/uid/{PROMETHEUS_DATASOURCE_UID}/api/v1/query",
+        {"query": f'kube_pod_status_phase{{namespace="{namespace}"}} == 1'},
+    )
+    if data is None or data.get("status") != "success":
+        return None
+
+    by_deployment: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
+    for row in data["data"]["result"]:
+        metric = row["metric"]
+        pod = metric.get("pod", "unknown")
+        phase = metric.get("phase", "Unknown")
+        by_deployment[_deployment_name(pod)][phase] += 1
+    return by_deployment
+
+
 def k8s_health(chat_id: str = "", args: Optional[list[str]] = None) -> str:
     """Summarise pod status for the configured namespace, grouped by deployment.
 
@@ -90,24 +124,11 @@ def k8s_health(chat_id: str = "", args: Optional[list[str]] = None) -> str:
         return "PROMETHEUS_DATASOURCE_UID is not configured — see .env."
 
     namespace = (args or [None])[0] or K8S_NAMESPACE
-    data = _grafana_get(
-        f"/api/datasources/proxy/uid/{PROMETHEUS_DATASOURCE_UID}/api/v1/query",
-        {"query": f'kube_pod_status_phase{{namespace="{namespace}"}} == 1'},
-    )
-    if data is None or data.get("status") != "success":
+    by_deployment = _pod_status_by_deployment(namespace)
+    if by_deployment is None:
         return f"Couldn't reach Prometheus for namespace '{namespace}' — try again shortly."
-
-    results = data["data"]["result"]
-    if not results:
+    if not by_deployment:
         return f"No pod status data found for namespace '{namespace}'."
-
-    # deployment -> {phase: count}
-    by_deployment: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
-    for row in results:
-        metric = row["metric"]
-        pod = metric.get("pod", "unknown")
-        phase = metric.get("phase", "Unknown")
-        by_deployment[_deployment_name(pod)][phase] += 1
 
     lines = [f"Namespace: {namespace}"]
     for deployment in sorted(by_deployment):
@@ -122,6 +143,51 @@ def k8s_health(chat_id: str = "", args: Optional[list[str]] = None) -> str:
             lines.append(f"✓ {deployment}: {total} Running")
 
     return "\n".join(lines)
+
+
+def check_k8s_health(chat_id: str) -> list[str]:
+    """Poll pod health and surface newly (or still) unhealthy deployments.
+
+    Unlike k8s_health() (the pull-based /status command), this is meant to
+    be polled periodically by a background job. Each unhealthy deployment
+    both sends an alert AND gets a pending task created for it (deduped so
+    a repeat poll while the same issue persists doesn't spam a fresh task
+    every cycle) — a chat notification alone can scroll past; a task
+    survives into /today and the daily digest.
+
+    Args:
+        chat_id: The owner to create investigation tasks for.
+
+    Returns:
+        A list of alert message strings for any unhealthy deployment
+        (usually empty).
+    """
+    namespace = K8S_NAMESPACE
+    by_deployment = _pod_status_by_deployment(namespace)
+    if not by_deployment:
+        return []
+
+    alerts: list[str] = []
+    now = time.time()
+    for deployment in sorted(by_deployment):
+        phases = by_deployment[deployment]
+        unhealthy = {p: c for p, c in phases.items() if p != "Running"}
+        if not unhealthy:
+            continue
+
+        state_key = f"k8s_unhealthy_alerted_{namespace}_{deployment}"
+        last_alerted = memory.get_preference(state_key)
+        if last_alerted and now - float(last_alerted) < _UNHEALTHY_REALERT_SECONDS:
+            continue
+        memory.set_preference(state_key, now)
+
+        detail = ", ".join(f"{count} {phase}" for phase, count in unhealthy.items())
+        alerts.append(f"K8s: '{deployment}' in {namespace} has {detail}.")
+
+        if not tasks.find_pending_tasks_matching(chat_id, deployment):
+            tasks.add_task(chat_id, f"Investigate {deployment} ({namespace}): {detail}".split())
+
+    return alerts
 
 
 def _fetch_log_lines(service: str, namespace: str) -> tuple[Optional[list[str]], Optional[str]]:

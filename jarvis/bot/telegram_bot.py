@@ -30,7 +30,7 @@ from bot import notifier
 from bot.commands import dispatch
 from brain import ask
 from config import OWNER_ID, TELEGRAM_ALLOWED_CHAT_IDS, TELEGRAM_BOT_TOKEN
-from modules import digest, email_watcher, expenses, finance, habits, intent, nudges, tasks, transcription
+from modules import devops, digest, email_watcher, expenses, finance, habits, intent, nudges, tasks, transcription
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,7 @@ DAILY_DIGEST_HOUR = 7  # local time, 24h clock
 BUDGET_PACING_POLL_SECONDS = 3600  # hourly — threshold state in nudges.py prevents repeats
 EVENING_NUDGE_HOUR = 21  # 9 PM — late enough that "no expenses today" is meaningful
 STALE_TASK_HOUR = 10  # mid-morning, when acting on a task nudge is most likely
+K8S_HEALTH_POLL_SECONDS = 900  # 15 minutes — devops issues deserve faster detection than daily checks
 
 
 async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -211,6 +212,15 @@ async def _check_habit_gaps(context: ContextTypes.DEFAULT_TYPE) -> None:
         await notifier.broadcast(alert)
 
 
+async def _check_k8s_health(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job-queue callback: broadcast + create a task for newly-unhealthy K8s deployments."""
+    try:
+        for alert in devops.check_k8s_health(OWNER_ID):
+            await notifier.broadcast(alert)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("K8s health check failed: %s", exc)
+
+
 async def _check_new_emails(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Job-queue callback: broadcast any new emails since the last poll."""
     for alert in email_watcher.check_new_emails():
@@ -292,6 +302,9 @@ def build_application() -> Application:
     )
     application.job_queue.run_repeating(
         _check_new_emails, interval=EMAIL_POLL_SECONDS, first=EMAIL_POLL_SECONDS
+    )
+    application.job_queue.run_repeating(
+        _check_k8s_health, interval=K8S_HEALTH_POLL_SECONDS, first=K8S_HEALTH_POLL_SECONDS
     )
     application.job_queue.run_repeating(
         _check_budget_pacing, interval=BUDGET_PACING_POLL_SECONDS, first=BUDGET_PACING_POLL_SECONDS
