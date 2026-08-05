@@ -291,8 +291,63 @@ def take_screenshot() -> str:
     return str(save_path)
 
 
+def _has_flag(cmd: str, letter: str, long_name: str) -> bool:
+    """True if cmd contains a short flag with `letter` in it (e.g. -rf, -fr, -Rf) or a long flag."""
+    return bool(re.search(rf"(?:^|\s)-\w*{letter}\w*(?:\s|$)", cmd, re.IGNORECASE)) or long_name in cmd
+
+
+# ---------------------------------------------------------------------------
+# run_command safety net — defense in depth, not a sandbox. Both the bot's
+# confirmation gate (modules/intent.py) and the voice pipeline's immediate
+# <ACTION> execution funnel through run_command() below, so blocking here
+# protects both entry points. This is a denylist rather than a fixed
+# allowlist (as JARVIS_V2_PLAN.md §7 originally floated): a personal ops
+# assistant needs to run arbitrary read/status/build commands (git, docker,
+# ls, npm...), so an exact-command allowlist would gut the feature. Instead
+# this blocks specific classes of commands that are destructive, irreversible,
+# or grant privilege escalation. A determined adversary could still obfuscate
+# a command past these patterns — this guards against LLM misclassification
+# and careless confirmations, not a hostile actor with shell access.
+# ---------------------------------------------------------------------------
+
+_BLOCKED_COMMAND_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\bsudo\b"), "privilege escalation (sudo)"),
+    (re.compile(r"\bdd\s+.*\bof=/dev/"), "raw disk write (dd of=/dev/...)"),
+    (re.compile(r"\bmkfs(\.\w+)?\b"), "filesystem format (mkfs)"),
+    (re.compile(r"\bdiskutil\s+(erase|partition|reformat)", re.IGNORECASE), "disk erase/partition (diskutil)"),
+    (re.compile(r">\s*/dev/(disk|sd|nvme|rdisk)"), "raw device write redirection"),
+    (re.compile(r"\b(curl|wget)\b.*\|\s*(sh|bash|zsh)\b"), "piping a remote download into a shell"),
+    (re.compile(r"\b(shutdown|reboot|halt|poweroff)\b"), "system shutdown/reboot"),
+    (re.compile(r"\bgit\s+push\s+.*(-f\b|--force\b)"), "force-push (rewrites remote history)"),
+    (re.compile(r"\bgit\s+reset\s+.*--hard\b"), "hard reset (discards local work)"),
+    (re.compile(r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;"), "fork bomb"),
+]
+
+
+def is_dangerous_command(cmd: str) -> Optional[str]:
+    """Return a human-readable reason if `cmd` matches a known-destructive pattern, else None.
+
+    Args:
+        cmd: The shell command string to check.
+
+    Returns:
+        A short description of why the command is blocked, or None if it's fine to run.
+    """
+    if re.search(r"(?:^|[;&|]\s*)rm\b", cmd) and _has_flag(cmd, "r", "--recursive") and _has_flag(cmd, "f", "--force"):
+        return "recursive forced delete (rm -rf)"
+    for pattern, reason in _BLOCKED_COMMAND_PATTERNS:
+        if pattern.search(cmd):
+            return reason
+    return None
+
+
 def run_command(cmd: str, max_chars: int = 200, cwd: Optional[str] = None) -> str:
     """Execute a shell command and return its stdout (truncated).
+
+    Refuses to run commands matching known-destructive patterns (see
+    is_dangerous_command) regardless of caller — this is the single choke
+    point both the bot's confirmation gate and the voice pipeline funnel
+    through, so the check applies uniformly to both entry paths.
 
     Args:
         cmd: The shell command string to execute.
@@ -306,6 +361,12 @@ def run_command(cmd: str, max_chars: int = 200, cwd: Optional[str] = None) -> st
         The command's stdout (or a short error description on failure).
     """
     logger.info("Action: run_command('%s')", cmd)
+
+    blocked_reason = is_dangerous_command(cmd)
+    if blocked_reason:
+        logger.warning("Blocked dangerous command (%s): %s", blocked_reason, cmd)
+        return f"Refused to run that — looks like {blocked_reason}. Not executing."
+
     result = subprocess.run(
         cmd,
         shell=True,

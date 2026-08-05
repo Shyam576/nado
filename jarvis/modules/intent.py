@@ -296,6 +296,12 @@ def _dispatch_run_command(chat_id: str, data: dict) -> Optional[IntentReply]:
     if not command:
         return None
 
+    import actions
+
+    blocked_reason = actions.is_dangerous_command(command)
+    if blocked_reason:
+        return IntentReply(f"I won't run that — {blocked_reason}.")
+
     # Never execute immediately — park the command behind the confirmation
     # gate. Execution happens in _check_pending_confirmation() on "yes".
     _pending_commands[chat_id] = (command, time.time())

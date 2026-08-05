@@ -20,6 +20,7 @@ Run with:  python main.py bot
 
 import logging
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import discord
@@ -42,6 +43,18 @@ logger = logging.getLogger(__name__)
 _DISCORD_MESSAGE_LIMIT = 2000
 _CHUNK_SIZE = 1900  # headroom under Discord's 2000-char cap
 _CATCHUP_SCAN_LIMIT = 200  # cap how far back we scan on reconnect, per channel
+
+# Only replay messages newer than this on reconnect; older ones are marked
+# seen but not processed. Without this, a long outage (laptop asleep
+# overnight, network down) followed by reconnect would run the full pipeline
+# — including expense logging, task creation, and run_command dispatch —
+# against a burst of stale, possibly no-longer-relevant messages. It also
+# closes a sharper bug: modules/intent.py's run_command confirmation gate
+# checks time.time() at processing time, not the message's original
+# timestamp, so a days-old "run <cmd>" + "yes" pair replayed back-to-back
+# would silently re-execute the moment the bot reconnects. Bounding replay
+# age means stale pairs like that are simply skipped instead.
+_CATCHUP_MAX_AGE_SECONDS = 15 * 60
 
 
 def _chunk(text: str) -> list[str]:
@@ -240,10 +253,24 @@ async def _catch_up(client: discord.Client) -> None:
 
         if last_seen and missed:
             logger.info("Catch-up: replaying %d missed message(s) in channel %s", len(missed), channel_id)
+
+        now = datetime.now(timezone.utc)
+        skipped_stale = 0
         for msg in missed:
             if last_seen:  # skip replay on the very first run — just establish the baseline
-                await _process_message(msg, client.user)
+                age_seconds = (now - msg.created_at).total_seconds()
+                if age_seconds > _CATCHUP_MAX_AGE_SECONDS:
+                    skipped_stale += 1
+                else:
+                    await _process_message(msg, client.user)
             memory.set_preference(_last_seen_key(channel_id), str(msg.id))
+
+        if skipped_stale:
+            logger.warning(
+                "Catch-up: skipped %d stale message(s) older than %ds in channel %s "
+                "(marked seen, not processed) — re-send any request that's still relevant.",
+                skipped_stale, _CATCHUP_MAX_AGE_SECONDS, channel_id,
+            )
 
         if not missed:
             # Nothing missed, but still need a baseline on first run — use the
