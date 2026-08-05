@@ -1,0 +1,4 @@
+# Development-only dependencies — not needed to run the bot itself, only to
+# run its test suite. Install with:
+#   python3 -m pip install -r requirements.txt -r requirements-dev.txt
+pytest>=8.0.0
