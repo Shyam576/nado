@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 import command_confirmation
-from modules import digest, expenses, finance, projects, system, tasks
+from modules import calendar_app, digest, expenses, finance, projects, system, tasks
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +118,7 @@ Intents and their required fields:
   {"intent": "budget_status"}
   {"intent": "list_expenses"}
   {"intent": "daily_summary"}
+  {"intent": "calendar_today"}
   {"intent": "gold_price"}
   {"intent": "ter_price"}
   {"intent": "take_screenshot"}
@@ -152,6 +153,8 @@ Examples:
 "show my recent expenses" -> {"intent": "list_expenses"}
 "add a task to renew my passport" -> {"intent": "add_task", "title": "renew my passport"}
 "what's on my plate today" -> {"intent": "daily_summary"}
+"what's on my calendar today" -> {"intent": "calendar_today"}
+"do I have any meetings today" -> {"intent": "calendar_today"}
 "mark task 3 as done" -> {"intent": "complete_task", "task_id": 3}
 "finished task 3" -> {"intent": "complete_task", "task_id": 3}
 "remind me in an hour to stretch" -> {"intent": "set_reminder", "minutes": 60, "message": "stretch"}
@@ -341,6 +344,7 @@ _DISPATCH: dict[str, Callable[[str, dict], Optional[IntentReply]]] = {
     "budget_status": _text_handler(expenses.budget_status),
     "list_expenses": lambda chat_id, data: IntentReply(expenses.list_expenses(chat_id, [])),
     "daily_summary": _text_handler(digest.build_daily_digest),
+    "calendar_today": _text_handler(calendar_app.today_events),
     "gold_price": lambda chat_id, data: IntentReply(finance.gold_price(chat_id, [])),
     "ter_price": lambda chat_id, data: IntentReply(finance.ter_price(chat_id, [])),
     "system_status": _text_handler(system.system_status),

@@ -9,6 +9,7 @@ through to the LLM chat path in bot/telegram_bot.py.
 from typing import Callable
 
 from modules import (
+    calendar_app,
     communication,
     decision,
     devops,
@@ -117,6 +118,7 @@ def _handle_daily_reminder(chat_id: str, args: list[str]) -> str:
 # Order here is also the order /help displays them in.
 HELP_TEXT: dict[str, str] = {
     "/today": "/today — pending task count + reminders due today",
+    "/calendar": "/calendar — today's events from macOS Calendar.app",
     "/tasks": "/tasks [add <title> | done <id>] — list, add, or complete tasks",
     "/remind": "/remind <minutes> <message> — schedule a one-off reminder",
     "/dailyremind": "/dailyremind <HH:MM> <message> | status | cancel — recurring daily reminder (replaces the previous one)",
@@ -147,6 +149,7 @@ HELP_TEXT: dict[str, str] = {
 
 COMMANDS: dict[str, Callable[[str, list[str]], str]] = {
     "/today": lambda chat_id, args: tasks.today_summary(chat_id),
+    "/calendar": lambda chat_id, args: calendar_app.today_events(chat_id, args),
     "/tasks": _handle_tasks,
     "/remind": lambda chat_id, args: tasks.add_reminder(chat_id, args),
     "/dailyremind": _handle_daily_reminder,

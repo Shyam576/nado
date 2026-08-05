@@ -10,7 +10,7 @@ and also available on-demand via /digest.
 import datetime
 import logging
 
-from modules import expenses, finance, habits, tasks
+from modules import calendar_app, expenses, finance, habits, tasks
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,10 @@ def build_daily_digest(chat_id: str) -> str:
 
     sections.append("Tasks:")
     sections.append(tasks.today_summary(chat_id))
+    sections.append("")
+
+    sections.append("Calendar:")
+    sections.append(calendar_app.today_events(chat_id))
     sections.append("")
 
     habit_summary = habits.habit_status(chat_id)
