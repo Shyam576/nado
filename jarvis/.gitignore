@@ -6,3 +6,4 @@ venv/
 jarvis_memory.json
 data/*.db
 data/receipts/
+data/logs/

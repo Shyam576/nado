@@ -37,6 +37,14 @@ MEMORY_FILE: Path = BASE_DIR / "jarvis_memory.json"
 DATA_DIR: Path = BASE_DIR / "data"
 DB_FILE: Path = DATA_DIR / "jarvis.db"
 
+# Rotating log file — bot mode runs headless under a LaunchAgent that
+# blindly redirects stdout/stderr into one unbounded file with no rotation
+# of its own, so main.py rotates this file itself instead.
+LOG_DIR: Path = DATA_DIR / "logs"
+LOG_FILE: Path = LOG_DIR / "jarvis.log"
+LOG_MAX_BYTES: int = 5 * 1024 * 1024  # 5 MB per file
+LOG_BACKUP_COUNT: int = 5             # keep 5 rotated files (~25 MB total on disk)
+
 # ---------------------------------------------------------------------------
 # Grafana / Prometheus / Loki (DevOps module — /status, /logs)
 # ---------------------------------------------------------------------------

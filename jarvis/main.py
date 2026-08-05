@@ -26,11 +26,12 @@ Voice pipeline:
 import logging
 import signal
 import sys
+from logging.handlers import RotatingFileHandler
 from typing import Optional
 
 from actions import parse_and_execute
 from brain import ask
-from config import validate_config
+from config import LOG_BACKUP_COUNT, LOG_DIR, LOG_FILE, LOG_MAX_BYTES, validate_config
 import memory
 import proactive
 import ui
@@ -40,14 +41,39 @@ from voice import listen, speak, calibrate_microphone, _stop_event
 # Logging
 # ---------------------------------------------------------------------------
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
-    datefmt="%H:%M:%S",
-)
-# httpx logs every request URL at INFO — for Telegram that URL contains the
-# bot token, which must never be written to logs. WARNING keeps real errors.
-logging.getLogger("httpx").setLevel(logging.WARNING)
+
+def _configure_logging(mode: str) -> None:
+    """Configure root logging: always a rotating file, plus console for interactive modes.
+
+    Bot mode runs headless under a LaunchAgent that blindly redirects
+    stdout/stderr into one unbounded file (~/Library/Logs/jarvis.log, no
+    rotation) — left alone, that grows forever on an always-on KeepAlive
+    process. Routing through a RotatingFileHandler instead keeps disk usage
+    bounded. Voice/text mode are run interactively in a terminal, so they
+    keep the console handler too.
+
+    Args:
+        mode: The CLI mode ("voice", "text", or "bot") — determines whether
+              a console handler is added alongside the rotating file handler.
+    """
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    handlers: list[logging.Handler] = [
+        RotatingFileHandler(LOG_FILE, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT)
+    ]
+    if mode != "bot":
+        handlers.append(logging.StreamHandler())
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
+        datefmt="%H:%M:%S",
+        handlers=handlers,
+    )
+    # httpx logs every request URL at INFO — for Telegram that URL contains the
+    # bot token, which must never be written to logs. WARNING keeps real errors.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -238,13 +264,14 @@ def _check_config_or_warn() -> None:
 
 
 def main() -> None:
-    """Parse CLI arguments, load persistent memory, and launch the appropriate mode."""
+    """Parse CLI arguments, configure logging, load persistent memory, and launch the appropriate mode."""
     from store.db import init_db
+
+    mode = sys.argv[1].lower() if len(sys.argv) > 1 else "voice"
+    _configure_logging(mode)
 
     memory.load()
     init_db()
-
-    mode = sys.argv[1].lower() if len(sys.argv) > 1 else "voice"
 
     if mode == "text":
         text_mode()
