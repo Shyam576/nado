@@ -19,6 +19,7 @@ from modules import (
     finance,
     habits,
     projects,
+    recall,
     system,
     tasks,
 )
@@ -143,6 +144,7 @@ HELP_TEXT: dict[str, str] = {
     "/budget": "/budget | /budget set <amount> — check or set your monthly budget",
     "/categories": "/categories — list all expense categories",
     "/check-email": "/check-email — manually poll for new emails (also runs automatically every 2 minutes)",
+    "/recall": "/recall <keyword> — search past tasks/expenses/mood/habits for a keyword",
     "/help": "/help — show this list",
     "(voice)": "Send a voice note/audio file — it gets transcribed, processed like typed text, and replied to with both text and a voice note back",
 }
@@ -174,6 +176,7 @@ COMMANDS: dict[str, Callable[[str, list[str]], str]] = {
     "/budget": _handle_budget,
     "/categories": lambda chat_id, args: expenses.list_categories(chat_id, args),
     "/check-email": _handle_check_email,
+    "/recall": lambda chat_id, args: recall.recall(chat_id, args),
     "/help": lambda chat_id, args: (
         "Available commands:\n"
         + "\n".join(HELP_TEXT.values())

@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 import command_confirmation
-from modules import calendar_app, digest, expenses, finance, projects, system, tasks
+from modules import calendar_app, digest, expenses, finance, projects, recall, system, tasks
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +119,7 @@ Intents and their required fields:
   {"intent": "list_expenses"}
   {"intent": "daily_summary"}
   {"intent": "calendar_today"}
+  {"intent": "recall", "keyword": "<the single topic/word to search past history for>"}
   {"intent": "gold_price"}
   {"intent": "ter_price"}
   {"intent": "take_screenshot"}
@@ -146,6 +147,8 @@ Rules:
 - In run_command, always write paths as absolute or ~-relative (e.g. ~/Desktop), never bare relative names.
 - take_screenshot is for just capturing the screen. explain_screenshot is for when the user
   wants to know what an error/message/dialog on screen says or means, or wants help fixing it.
+- recall is for "what did I log/spend/say about X" questions looking back at history — extract
+  just the single core topic word as keyword, not the whole question.
 
 Examples:
 "spent 250 on coffee" -> {"intent": "add_expense", "amount": 250, "description": "coffee"}
@@ -155,6 +158,8 @@ Examples:
 "what's on my plate today" -> {"intent": "daily_summary"}
 "what's on my calendar today" -> {"intent": "calendar_today"}
 "do I have any meetings today" -> {"intent": "calendar_today"}
+"what have I logged about gold" -> {"intent": "recall", "keyword": "gold"}
+"what did I say about the passport task" -> {"intent": "recall", "keyword": "passport"}
 "mark task 3 as done" -> {"intent": "complete_task", "task_id": 3}
 "finished task 3" -> {"intent": "complete_task", "task_id": 3}
 "remind me in an hour to stretch" -> {"intent": "set_reminder", "minutes": 60, "message": "stretch"}
@@ -262,6 +267,13 @@ def _dispatch_screenshot(chat_id: str, data: dict) -> Optional[IntentReply]:
     return IntentReply("Here's your screen.", image_path=path)
 
 
+def _dispatch_recall(chat_id: str, data: dict) -> Optional[IntentReply]:
+    keyword = str(data.get("keyword", "")).strip()
+    if not keyword:
+        return None
+    return IntentReply(recall.recall(chat_id, keyword.split()))
+
+
 def _dispatch_explain_screenshot(chat_id: str, data: dict) -> Optional[IntentReply]:
     from modules import vision
 
@@ -345,6 +357,7 @@ _DISPATCH: dict[str, Callable[[str, dict], Optional[IntentReply]]] = {
     "list_expenses": lambda chat_id, data: IntentReply(expenses.list_expenses(chat_id, [])),
     "daily_summary": _text_handler(digest.build_daily_digest),
     "calendar_today": _text_handler(calendar_app.today_events),
+    "recall": _dispatch_recall,
     "gold_price": lambda chat_id, data: IntentReply(finance.gold_price(chat_id, [])),
     "ter_price": lambda chat_id, data: IntentReply(finance.ter_price(chat_id, [])),
     "system_status": _text_handler(system.system_status),
