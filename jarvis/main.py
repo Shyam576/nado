@@ -8,7 +8,7 @@ Usage
   python main.py bot      # Telegram bot mode (see bot/telegram_bot.py)
 
 100 % free stack — no API keys required:
-  LLM  : Ollama (local)           https://ollama.com
+  LLM  : llama-cpp-python (local, model fetched via `ollama pull`)
   TTS  : edge-tts (neural) / pyttsx3 (offline fallback)
   STT  : Whisper (offline) + SpeechRecognition
   Mem  : local JSON (jarvis_memory.json)
@@ -17,7 +17,7 @@ Voice pipeline:
   1. Load persistent memory from disk.
   2. Listen continuously for speech.
   3. Transcribe via Whisper.
-  4. Send text + conversation history + system prompt → Ollama LLM.
+  4. Send text + conversation history + system prompt → the local LLM.
   5. Parse any <ACTION> tags and execute them.
   6. Speak the cleaned reply via edge-tts / pyttsx3.
   7. Return to step 2.
@@ -31,7 +31,8 @@ from typing import Optional
 
 from actions import parse_and_execute
 from brain import ask
-from config import LOG_BACKUP_COUNT, LOG_DIR, LOG_FILE, LOG_MAX_BYTES, validate_config
+import command_confirmation
+from config import LOG_BACKUP_COUNT, LOG_DIR, LOG_FILE, LOG_MAX_BYTES, OWNER_ID, validate_config
 import memory
 import proactive
 import ui
@@ -91,6 +92,19 @@ def process_input(user_text: str) -> None:
     logger.info("Processing: '%s'", user_text)
 
     ui.set_state("thinking")
+
+    # Check for a pending run_command confirmation before the LLM ever sees
+    # this utterance — a bare "yes"/"no" must resolve the parked command
+    # directly, same as bot mode's intent.route() does, not get treated as
+    # a fresh conversational turn.
+    confirmation = command_confirmation.check(OWNER_ID, user_text)
+    if confirmation is not None:
+        ui.add_jarvis(confirmation)
+        if not ui.is_active():
+            print(f"\n[Jarvis]: {confirmation}\n")
+        speak(confirmation)
+        return
+
     reply = ask(user_text)
     logger.debug("Raw reply: %s", reply)
 

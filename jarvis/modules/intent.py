@@ -21,10 +21,10 @@ pattern as proactive.py's one-shot calls).
 import json
 import logging
 import re
-import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+import command_confirmation
 from modules import digest, expenses, finance, projects, system, tasks
 
 logger = logging.getLogger(__name__)
@@ -67,46 +67,17 @@ _SCREENSHOT_RE = re.compile(
 )
 
 # ---------------------------------------------------------------------------
-# run_command confirmation gate — shell execution never happens on the first
-# message. The command is parked here and only runs after an explicit "yes"
-# within the window. One mis-classified message can therefore never execute.
+# run_command confirmation gate — see command_confirmation.py. Shared with
+# the voice pipeline (actions.parse_and_execute) so "yes" means the same
+# thing and follows the same rules regardless of which entry point staged
+# the command.
 # ---------------------------------------------------------------------------
-
-_CONFIRM_WINDOW_SECONDS = 60
-_pending_commands: dict[str, tuple[str, float]] = {}  # chat_id -> (command, queued_at)
-
-_CONFIRM_RE = re.compile(r"^(?:yes|y|confirm|do it|run it)[.!]?$", re.IGNORECASE)
-_CANCEL_RE = re.compile(r"^(?:no|n|cancel|stop|abort)[.!]?$", re.IGNORECASE)
 
 
 def _check_pending_confirmation(chat_id: str, text: str) -> Optional[IntentReply]:
     """Resolve a parked run_command if this message confirms or cancels it."""
-    pending = _pending_commands.get(chat_id)
-    if pending is None:
-        return None
-
-    command, queued_at = pending
-    if time.time() - queued_at > _CONFIRM_WINDOW_SECONDS:
-        del _pending_commands[chat_id]
-        if _CONFIRM_RE.match(text):
-            return IntentReply("That command request expired — ask again if you still want it.")
-        return None  # window passed; treat the message as a fresh request
-
-    if _CONFIRM_RE.match(text):
-        del _pending_commands[chat_id]
-        import actions
-        from pathlib import Path
-
-        output = actions.run_command(command, max_chars=1500, cwd=str(Path.home()))
-        return IntentReply(f"$ {command}\n{output}")
-
-    if _CANCEL_RE.match(text):
-        del _pending_commands[chat_id]
-        return IntentReply("Cancelled — nothing was run.")
-
-    # Any other message implicitly abandons the pending command.
-    del _pending_commands[chat_id]
-    return None
+    result = command_confirmation.check(chat_id, text)
+    return IntentReply(result) if result is not None else None
 
 
 def _fast_path(chat_id: str, text: str) -> Optional[IntentReply]:
@@ -317,10 +288,7 @@ def _dispatch_run_command(chat_id: str, data: dict) -> Optional[IntentReply]:
 
     # Never execute immediately — park the command behind the confirmation
     # gate. Execution happens in _check_pending_confirmation() on "yes".
-    _pending_commands[chat_id] = (command, time.time())
-    return IntentReply(
-        f"Run this?\n$ {command}\nReply “yes” within {_CONFIRM_WINDOW_SECONDS}s to execute, “no” to cancel."
-    )
+    return IntentReply(command_confirmation.stage(chat_id, command))
 
 
 def _dispatch_read_clipboard(chat_id: str, data: dict) -> Optional[IntentReply]:

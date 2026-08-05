@@ -37,6 +37,9 @@ from typing import Any, Optional
 
 import pyautogui
 
+import command_confirmation
+from config import OWNER_ID
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -673,8 +676,14 @@ def parse_and_execute(reply: str) -> tuple[Optional[str], str]:
             path = take_screenshot()
             result = f"Screenshot saved to {path}."
         elif action_type == "run_command":
-            output = run_command(action.get("cmd", ""))
-            result = f"Command output: {output}"
+            # Never execute immediately — park behind the same confirmation
+            # gate bot mode uses (command_confirmation.py), resolved by the
+            # next utterance in main.py's process_input(). Overriding
+            # clean_reply below is what actually gets this spoken instead of
+            # the LLM's own "Running that command." line, which would
+            # otherwise wrongly imply it already ran.
+            result = command_confirmation.stage(OWNER_ID, action.get("cmd", ""))
+            clean_reply = result
         elif action_type == "get_datetime":
             result = get_datetime()
         elif action_type == "get_weather":
