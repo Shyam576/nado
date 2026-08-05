@@ -178,6 +178,57 @@ def _pyttsx3_speak(text: str) -> None:
         engine.stop()
 
 
+async def _edge_synthesize_async(text: str, out_path: str) -> None:
+    """Generate speech with edge-tts and save it to out_path, without playing it."""
+    communicate = edge_tts.Communicate(text, EDGE_TTS_VOICE)
+    await communicate.save(out_path)
+
+
+def synthesize_to_file(text: str) -> Optional[str]:
+    """Generate a speech audio file for `text`, for sending as a bot attachment.
+
+    Unlike speak(), this never plays through local speakers — it's for
+    transports (Telegram/Discord) that want to send a voice-note reply
+    alongside their text reply. Falls back to pyttsx3 (saved as .wav) if
+    edge-tts fails, same fallback order as speak().
+
+    Args:
+        text: The text to synthesize.
+
+    Returns:
+        Path to a temporary audio file the caller must delete after use, or
+        None if both TTS engines failed (or `text` was empty after cleaning).
+    """
+    text = _clean_for_speech(text)
+    if not text:
+        return None
+
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+        mp3_path = f.name
+
+    try:
+        asyncio.run(_edge_synthesize_async(text, mp3_path))
+        return mp3_path
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("edge-tts file synthesis failed (%s); falling back to pyttsx3.", exc)
+        try:
+            os.unlink(mp3_path)
+        except OSError:
+            pass
+
+    wav_path = mp3_path[:-4] + ".wav"
+    try:
+        with _tts_lock:
+            engine = _make_tts_engine()
+            engine.save_to_file(text, wav_path)
+            engine.runAndWait()
+            engine.stop()
+        return wav_path
+    except Exception as exc2:  # noqa: BLE001
+        logger.error("TTS file synthesis fallback also failed: %s", exc2)
+        return None
+
+
 def speak(text: str) -> None:
     """Convert text to speech using edge-tts (Microsoft neural voices).
 

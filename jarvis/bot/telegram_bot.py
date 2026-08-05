@@ -20,12 +20,14 @@ Run with:  python main.py bot
 import asyncio
 import datetime
 import logging
+import os
 import tempfile
 from pathlib import Path
 
 from telegram import Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
+import voice
 from bot import notifier
 from bot.commands import dispatch
 from brain import ask
@@ -169,6 +171,24 @@ async def _handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await message.reply_text(text_reply)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to send voice reply: %s", exc)
+
+    # Reply in kind: the user sent voice, so also speak the reply back, not
+    # just the transcript echo — mirrors the input modality instead of
+    # always forcing text-only replies for a voice conversation.
+    audio_path = None
+    try:
+        audio_path = voice.synthesize_to_file(reply)
+        if audio_path:
+            with open(audio_path, "rb") as audio_file:
+                await message.reply_audio(audio=audio_file)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to send voice-note reply: %s", exc)
+    finally:
+        if audio_path:
+            try:
+                os.unlink(audio_path)
+            except OSError:
+                pass
 
 
 async def _deliver_due_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:

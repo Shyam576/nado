@@ -142,7 +142,7 @@ HELP_TEXT: dict[str, str] = {
     "/categories": "/categories — list all expense categories",
     "/check-email": "/check-email — manually poll for new emails (also runs automatically every 2 minutes)",
     "/help": "/help — show this list",
-    "(voice)": "Send a voice note/audio file — it gets transcribed and processed like typed text",
+    "(voice)": "Send a voice note/audio file — it gets transcribed, processed like typed text, and replied to with both text and a voice note back",
 }
 
 COMMANDS: dict[str, Callable[[str, list[str]], str]] = {
