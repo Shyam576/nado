@@ -150,6 +150,7 @@ Intents and their required fields:
   {"intent": "gold_price"}
   {"intent": "ter_price"}
   {"intent": "take_screenshot"}
+  {"intent": "explain_screenshot"}
   {"intent": "open_app", "app": "<application name>"}
   {"intent": "run_command", "command": "<shell command>"}
   {"intent": "read_clipboard"}
@@ -171,6 +172,8 @@ Rules:
 - Never invent an amount, task id, or reminder time that is not in the message.
 - The laptop actions (screenshot, open_app, run_command, clipboard, play_media) run on the user's own computer.
 - In run_command, always write paths as absolute or ~-relative (e.g. ~/Desktop), never bare relative names.
+- take_screenshot is for just capturing the screen. explain_screenshot is for when the user
+  wants to know what an error/message/dialog on screen says or means, or wants help fixing it.
 
 Examples:
 "spent 250 on coffee" -> {"intent": "add_expense", "amount": 250, "description": "coffee"}
@@ -189,6 +192,9 @@ Examples:
 "what's the gold rate" -> {"intent": "gold_price"}
 "open spotify" -> {"intent": "open_app", "app": "Spotify"}
 "show me what's on my screen" -> {"intent": "take_screenshot"}
+"what does this error say" -> {"intent": "explain_screenshot"}
+"what's wrong with my screen" -> {"intent": "explain_screenshot"}
+"help me fix this error on screen" -> {"intent": "explain_screenshot"}
 "run git status in ~/Desktop/nado/jarvis" -> {"intent": "run_command", "command": "cd ~/Desktop/nado/jarvis && git status"}
 "what's in my clipboard" -> {"intent": "read_clipboard"}
 "copy my email s@example.com to the clipboard" -> {"intent": "write_clipboard", "text": "s@example.com"}
@@ -282,6 +288,13 @@ def _dispatch_screenshot(chat_id: str, data: dict) -> Optional[IntentReply]:
     return IntentReply("Here's your screen.", image_path=path)
 
 
+def _dispatch_explain_screenshot(chat_id: str, data: dict) -> Optional[IntentReply]:
+    from modules import vision
+
+    text, image_path = vision.explain_screenshot()
+    return IntentReply(text, image_path=image_path)
+
+
 def _dispatch_open_app(chat_id: str, data: dict) -> Optional[IntentReply]:
     app = str(data.get("app", "")).strip()
     if not app:
@@ -370,6 +383,7 @@ _DISPATCH: dict[str, Callable[[str, dict], Optional[IntentReply]]] = {
         if str(data.get("name", "")).strip() else None
     ),
     "take_screenshot": _dispatch_screenshot,
+    "explain_screenshot": _dispatch_explain_screenshot,
     "open_app": _dispatch_open_app,
     "run_command": _dispatch_run_command,
     "read_clipboard": _dispatch_read_clipboard,
