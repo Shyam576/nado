@@ -1,20 +1,30 @@
 """
-modules/devops.py — Kubernetes health and logs, via Grafana's datasource proxy.
+modules/devops.py — Kubernetes health, logs, and (gated) restarts.
 
-Deliberately does NOT talk to the Kubernetes API directly (no kubeconfig, no
-VPN dependency on the bot's host) — instead queries Prometheus (via
-kube-state-metrics) and Loki through Grafana's own API, authenticated with a
-Grafana service account Bearer token. This matches the finance.py pattern:
-plain HTTP GET, parse JSON, format for Telegram.
+/status and /logs deliberately do NOT talk to the Kubernetes API directly
+(no kubeconfig, no VPN dependency on the bot's host) — instead they query
+Prometheus (via kube-state-metrics) and Loki through Grafana's own API,
+authenticated with a Grafana service account Bearer token. This matches the
+finance.py pattern: plain HTTP GET, parse JSON, format for Telegram.
+
+request_restart()/_restart_deployment() are the one exception: restarting a
+deployment mutates cluster state, which Grafana has no way to proxy (it only
+reads metrics/logs) — so that path talks to the Kubernetes API directly via
+a typed PATCH request (never a shell/kubectl call), gated behind an explicit
+confirmation, and requires the bot's host to actually reach the API server.
+See config.py's K8S_API_URL/K8S_SERVICE_ACCOUNT_TOKEN for what that needs.
 
 Requires (see config.py / .env):
   GRAFANA_URL, GRAFANA_API_TOKEN, PROMETHEUS_DATASOURCE_UID, LOKI_DATASOURCE_UID
+  K8S_API_URL, K8S_SERVICE_ACCOUNT_TOKEN (restart only)
 """
 
 import collections
+import datetime
 import json
 import logging
 import re
+import ssl
 import time
 import urllib.error
 import urllib.parse
@@ -25,7 +35,10 @@ import memory
 from config import (
     GRAFANA_API_TOKEN,
     GRAFANA_URL,
+    K8S_API_URL,
+    K8S_CA_CERT_PATH,
     K8S_NAMESPACE,
+    K8S_SERVICE_ACCOUNT_TOKEN,
     LOKI_DATASOURCE_UID,
     PROMETHEUS_DATASOURCE_UID,
 )
@@ -37,6 +50,16 @@ _REQUEST_TIMEOUT_SECONDS = 15
 _LOG_LOOKBACK_SECONDS = 24 * 3600
 _MAX_LINE_CHARS = 300  # some app logs (e.g. raw SQL dumps) are absurdly long on their own
 _MAX_REPLY_CHARS = 3500  # Telegram caps messages at 4096; leave headroom
+
+# Confirmation gate for restart requests — separate from
+# command_confirmation.py (which is specifically about shell commands) since
+# this confirms a typed API call instead. Same shape (park, confirm/cancel,
+# timeout) deliberately duplicated rather than generalizing that module for
+# a single additional caller.
+_RESTART_CONFIRM_WINDOW_SECONDS = 60
+_pending_restarts: dict[str, tuple[str, str, float]] = {}  # chat_id -> (namespace, deployment, queued_at)
+_RESTART_CONFIRM_RE = re.compile(r"^(?:yes|y|confirm|do it|restart it)[.!]?$", re.IGNORECASE)
+_RESTART_CANCEL_RE = re.compile(r"^(?:no|n|cancel|stop|abort)[.!]?$", re.IGNORECASE)
 
 # Re-alert (and consider a fresh task) for a still-unhealthy deployment at
 # most this often — avoids re-notifying and re-tasking on every poll while
@@ -322,3 +345,142 @@ def _fit_to_reply_limit(lines: list[str]) -> str:
     if dropped:
         text = f"(showing last {len(kept)} of {len(lines)} lines)\n" + text
     return text
+
+
+# ---------------------------------------------------------------------------
+# /restart — gated deployment restart via the Kubernetes API directly
+# ---------------------------------------------------------------------------
+
+
+def request_restart(chat_id: str, deployment: str, namespace: str = "") -> str:
+    """Stage a deployment restart for confirmation — never executes immediately.
+
+    Args:
+        chat_id: The owner requesting the restart.
+        deployment: The deployment name to restart.
+        namespace: Namespace override; defaults to K8S_NAMESPACE.
+
+    Returns:
+        A confirmation prompt. Execution happens in
+        check_restart_confirmation() only after an explicit "yes".
+    """
+    if not deployment.strip():
+        return "Usage: /restart <deployment> [namespace]"
+
+    namespace = namespace.strip() or K8S_NAMESPACE
+    _pending_restarts[chat_id] = (namespace, deployment, time.time())
+    return (
+        f"Restart deployment '{deployment}' in namespace '{namespace}'?\n"
+        f"Reply “yes” within {_RESTART_CONFIRM_WINDOW_SECONDS}s to confirm, “no” to cancel."
+    )
+
+
+def check_restart_confirmation(chat_id: str, text: str) -> Optional[str]:
+    """Resolve a parked restart request if `text` confirms or cancels it.
+
+    Args:
+        chat_id: The owner who may have a pending restart.
+        text: The next message from that chat.
+
+    Returns:
+        The result string if `text` was consumed as a confirm/cancel/expiry
+        reply, or None if there's nothing pending / text isn't a yes/no —
+        callers should treat None as "not a confirmation".
+    """
+    pending = _pending_restarts.get(chat_id)
+    if pending is None:
+        return None
+
+    namespace, deployment, queued_at = pending
+    if time.time() - queued_at > _RESTART_CONFIRM_WINDOW_SECONDS:
+        del _pending_restarts[chat_id]
+        if _RESTART_CONFIRM_RE.match(text):
+            return "That restart request expired — ask again if you still want it."
+        return None
+
+    if _RESTART_CONFIRM_RE.match(text):
+        del _pending_restarts[chat_id]
+        return _restart_deployment(namespace, deployment)
+
+    if _RESTART_CANCEL_RE.match(text):
+        del _pending_restarts[chat_id]
+        return "Cancelled — nothing was restarted."
+
+    del _pending_restarts[chat_id]
+    return None
+
+
+def _ssl_context() -> ssl.SSLContext:
+    """Build the SSL context for the K8s API request — system trust store,
+    or a private CA bundle if K8S_CA_CERT_PATH is set. No insecure/skip-
+    verification option is offered."""
+    if K8S_CA_CERT_PATH:
+        return ssl.create_default_context(cafile=K8S_CA_CERT_PATH)
+    return ssl.create_default_context()
+
+
+def _restart_deployment(namespace: str, deployment: str) -> str:
+    """PATCH the deployment's pod template annotation to trigger a rolling restart.
+
+    Same mechanism `kubectl rollout restart` uses under the hood — stamping
+    a fresh `kubectl.kubernetes.io/restartedAt` annotation onto the pod
+    template, which the Deployment controller treats as a spec change and
+    rolls pods accordingly. Talks to the Kubernetes API directly (typed
+    PATCH, bearer-token auth) — the one function in this module that does,
+    since Grafana has no facility for mutating cluster state.
+
+    Args:
+        namespace: The namespace the deployment lives in.
+        deployment: The deployment name.
+
+    Returns:
+        A confirmation or error string.
+    """
+    if not K8S_API_URL or not K8S_SERVICE_ACCOUNT_TOKEN:
+        return "K8S_API_URL / K8S_SERVICE_ACCOUNT_TOKEN not configured — see .env."
+
+    url = f"{K8S_API_URL}/apis/apps/v1/namespaces/{namespace}/deployments/{deployment}"
+    patch_body = json.dumps(
+        {
+            "spec": {
+                "template": {
+                    "metadata": {
+                        "annotations": {
+                            "kubectl.kubernetes.io/restartedAt": datetime.datetime.now(
+                                datetime.timezone.utc
+                            ).isoformat()
+                        }
+                    }
+                }
+            }
+        }
+    ).encode()
+
+    request = urllib.request.Request(
+        url,
+        data=patch_body,
+        method="PATCH",
+        headers={
+            "Authorization": f"Bearer {K8S_SERVICE_ACCOUNT_TOKEN}",
+            "Content-Type": "application/strategic-merge-patch+json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(
+            request, timeout=_REQUEST_TIMEOUT_SECONDS, context=_ssl_context()
+        ) as resp:
+            if resp.status not in (200, 201):
+                return f"Restart request for '{deployment}' returned unexpected status {resp.status}."
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode(errors="replace")
+        logger.error("K8s restart failed (%s) for %s/%s: %s", exc.code, namespace, deployment, body)
+        if exc.code == 404:
+            return f"Deployment '{deployment}' not found in namespace '{namespace}'."
+        if exc.code in (401, 403):
+            return "Not authorized to restart that deployment — check the service account's RBAC role."
+        return f"Restart request failed (HTTP {exc.code})."
+    except (urllib.error.URLError, TimeoutError) as exc:
+        logger.error("K8s API unreachable for restart of %s/%s: %s", namespace, deployment, exc)
+        return "Couldn't reach the Kubernetes API server — check K8S_API_URL and network/VPN access."
+
+    return f"Restart triggered for '{deployment}' in namespace '{namespace}'."

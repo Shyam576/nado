@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 import command_confirmation
-from modules import calendar_app, digest, expenses, finance, projects, recall, system, tasks
+from modules import calendar_app, devops, digest, expenses, finance, projects, recall, system, tasks
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +120,7 @@ Intents and their required fields:
   {"intent": "daily_summary"}
   {"intent": "calendar_today"}
   {"intent": "recall", "keyword": "<the single topic/word to search past history for>"}
+  {"intent": "restart_deployment", "deployment": "<deployment name>", "namespace": "<namespace, or empty string>"}
   {"intent": "gold_price"}
   {"intent": "ter_price"}
   {"intent": "take_screenshot"}
@@ -149,6 +150,7 @@ Rules:
   wants to know what an error/message/dialog on screen says or means, or wants help fixing it.
 - recall is for "what did I log/spend/say about X" questions looking back at history — extract
   just the single core topic word as keyword, not the whole question.
+- restart_deployment is never executed immediately — it always asks for confirmation first.
 
 Examples:
 "spent 250 on coffee" -> {"intent": "add_expense", "amount": 250, "description": "coffee"}
@@ -160,6 +162,8 @@ Examples:
 "do I have any meetings today" -> {"intent": "calendar_today"}
 "what have I logged about gold" -> {"intent": "recall", "keyword": "gold"}
 "what did I say about the passport task" -> {"intent": "recall", "keyword": "passport"}
+"restart the auth service" -> {"intent": "restart_deployment", "deployment": "auth-service", "namespace": ""}
+"restart payment-service in prod" -> {"intent": "restart_deployment", "deployment": "payment-service", "namespace": "prod"}
 "mark task 3 as done" -> {"intent": "complete_task", "task_id": 3}
 "finished task 3" -> {"intent": "complete_task", "task_id": 3}
 "remind me in an hour to stretch" -> {"intent": "set_reminder", "minutes": 60, "message": "stretch"}
@@ -274,6 +278,14 @@ def _dispatch_recall(chat_id: str, data: dict) -> Optional[IntentReply]:
     return IntentReply(recall.recall(chat_id, keyword.split()))
 
 
+def _dispatch_restart_deployment(chat_id: str, data: dict) -> Optional[IntentReply]:
+    deployment = str(data.get("deployment", "")).strip()
+    if not deployment:
+        return None
+    namespace = str(data.get("namespace", "")).strip()
+    return IntentReply(devops.request_restart(chat_id, deployment, namespace))
+
+
 def _dispatch_explain_screenshot(chat_id: str, data: dict) -> Optional[IntentReply]:
     from modules import vision
 
@@ -358,6 +370,7 @@ _DISPATCH: dict[str, Callable[[str, dict], Optional[IntentReply]]] = {
     "daily_summary": _text_handler(digest.build_daily_digest),
     "calendar_today": _text_handler(calendar_app.today_events),
     "recall": _dispatch_recall,
+    "restart_deployment": _dispatch_restart_deployment,
     "gold_price": lambda chat_id, data: IntentReply(finance.gold_price(chat_id, [])),
     "ter_price": lambda chat_id, data: IntentReply(finance.ter_price(chat_id, [])),
     "system_status": _text_handler(system.system_status),
@@ -401,6 +414,13 @@ def route(chat_id: str, text: str) -> Optional[IntentReply]:
     confirmation = _check_pending_confirmation(chat_id, text)
     if confirmation is not None:
         return confirmation
+
+    # Same shape as the run_command gate above, checked second — if both a
+    # command and a restart were somehow staged within the same 60s window
+    # (unlikely for a single-user bot), the run_command gate wins the "yes".
+    restart_confirmation = devops.check_restart_confirmation(chat_id, text)
+    if restart_confirmation is not None:
+        return IntentReply(restart_confirmation)
 
     reply = _fast_path(chat_id, text)
     if reply is not None:

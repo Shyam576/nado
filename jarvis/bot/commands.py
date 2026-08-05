@@ -64,6 +64,15 @@ def _handle_logs(chat_id: str, args: list[str]) -> str:
     return devops.tail_logs(chat_id, args)
 
 
+def _handle_restart(chat_id: str, args: list[str]) -> str:
+    """Stage a deployment restart for confirmation — never executes immediately."""
+    if not args:
+        return "Usage: /restart <deployment> [namespace]"
+    deployment = args[0]
+    namespace = args[1] if len(args) > 1 else ""
+    return devops.request_restart(chat_id, deployment, namespace)
+
+
 def _handle_budget(chat_id: str, args: list[str]) -> str:
     """Route /budget subcommands: status (default), or set <amount>."""
     if args and args[0].lower() == "set":
@@ -129,6 +138,7 @@ HELP_TEXT: dict[str, str] = {
     "/project": "/project <name> — git branch, last commit, dirty files, containers for a repo",
     "/cleanup": "/cleanup — sort loose files in ~/Downloads into subfolders (move-only)",
     "/logs": "/logs <service> [namespace] | /logs summary <service> — raw tail, or an LLM summary",
+    "/restart": "/restart <deployment> [namespace] — restart a deployment (requires confirmation)",
     "/gold": "/gold [target <price> | target clear] — gold spot price / alert target",
     "/ter": "/ter [usd|inr|btn|all] [target buy|sell <price> | target clear] — TER price / alerts",
     "/draft-email": "/draft-email <what to say> — draft an email via LLM",
@@ -163,6 +173,7 @@ COMMANDS: dict[str, Callable[[str, list[str]], str]] = {
     "/gold": lambda chat_id, args: finance.gold_price(chat_id, args),
     "/ter": _handle_ter,
     "/logs": _handle_logs,
+    "/restart": _handle_restart,
     "/draft-email": lambda chat_id, args: communication.draft_email(chat_id, args),
     "/rewrite": lambda chat_id, args: communication.rewrite_message(chat_id, args),
     "/notes": lambda chat_id, args: communication.process_meeting_notes(chat_id, args),

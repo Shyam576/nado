@@ -64,6 +64,31 @@ LOKI_DATASOURCE_UID: str = os.environ.get("LOKI_DATASOURCE_UID", "")
 K8S_NAMESPACE: str = os.environ.get("K8S_NAMESPACE", "dev")
 
 # ---------------------------------------------------------------------------
+# Kubernetes API — direct access, /restart only
+# ---------------------------------------------------------------------------
+#
+# Every other devops.py function deliberately avoids the Kubernetes API (see
+# that module's docstring) so the bot's host needs no kubeconfig/VPN.
+# Restarting a deployment mutates cluster state, which Grafana has no way to
+# proxy (it only reads metrics/logs via Prometheus/Loki) — so this one
+# action needs direct network access to the API server (VPN or same
+# network), unlike everything else in this bot. Leave unset to disable
+# /restart entirely; it fails closed with a clear message, not silently.
+
+# Direct Kubernetes API server URL, e.g. https://k8s-api.example.com:6443
+K8S_API_URL: str = os.environ.get("K8S_API_URL", "").rstrip("/")
+
+# Bearer token for a Kubernetes ServiceAccount. Scope its RBAC role to
+# "patch" on Deployments in only the namespaces you actually want restart
+# access to — never point this at a cluster-admin token.
+K8S_SERVICE_ACCOUNT_TOKEN: str = os.environ.get("K8S_SERVICE_ACCOUNT_TOKEN", "")
+
+# Optional CA bundle path, if the API server presents a private/cluster CA
+# not already in the system trust store. Leave unset to use the system
+# default trust store — there is no "skip verification" option here.
+K8S_CA_CERT_PATH: str = os.environ.get("K8S_CA_CERT_PATH", "")
+
+# ---------------------------------------------------------------------------
 # Model settings  (no API key — runs 100 % locally via llama-cpp-python)
 # ---------------------------------------------------------------------------
 
