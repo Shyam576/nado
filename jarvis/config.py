@@ -2,7 +2,9 @@
 config.py — Central configuration for the Jarvis AI assistant.
 
 100 % free stack — no API keys required.
-  LLM  : Ollama (local)  — https://ollama.com
+  LLM  : llama-cpp-python (local) — model file fetched via `ollama pull`,
+         brain.py reads the GGUF blob directly; the Ollama server itself
+         (`ollama serve`) is not used at runtime.
   TTS  : edge-tts (primary neural voice) / pyttsx3 (offline fallback)
   STT  : Whisper (offline) + SpeechRecognition
   Wake : speech-based keyword detection
@@ -54,11 +56,8 @@ LOKI_DATASOURCE_UID: str = os.environ.get("LOKI_DATASOURCE_UID", "")
 K8S_NAMESPACE: str = os.environ.get("K8S_NAMESPACE", "dev")
 
 # ---------------------------------------------------------------------------
-# Ollama settings  (no API key — runs 100 % locally)
+# Model settings  (no API key — runs 100 % locally via llama-cpp-python)
 # ---------------------------------------------------------------------------
-
-# URL of the Ollama server started by `ollama serve`
-OLLAMA_BASE_URL: str = "http://localhost:11434"
 
 # Model to use — pull it first:  ollama pull llama3.2
 # Smaller/faster alternatives (less RAM):
@@ -318,18 +317,20 @@ EMAIL_FOLDER: str = os.environ.get("EMAIL_FOLDER", "INBOX")
 def validate_config() -> list[str]:
     """Return a list of configuration warnings (empty = all good).
 
-    For the free stack the only real requirement is that the Ollama server
-    is reachable.  This check is advisory — the error will surface naturally
-    on the first `ask()` call if Ollama is not running.
+    brain.py loads the model straight from Ollama's local blob store rather
+    than talking to a running Ollama server, so the real requirement is that
+    `ollama pull <model>` has been run at least once. This check is
+    advisory — the same error will surface naturally on the first `ask()`
+    call if the blob is missing.
     """
     warnings: list[str] = []
     try:
-        import urllib.request
-        urllib.request.urlopen(f"{OLLAMA_BASE_URL}/api/tags", timeout=2)
-    except Exception:  # noqa: BLE001
+        import brain
+        brain._find_gguf()
+    except Exception as exc:  # noqa: BLE001
         warnings.append(
-            f"Ollama server not reachable at {OLLAMA_BASE_URL}. "
-            "Run `ollama serve` and ensure the model is pulled."
+            f"Could not locate the '{OLLAMA_MODEL}' model file ({exc}). "
+            f"Run `ollama pull {OLLAMA_MODEL}` to download it."
         )
     return warnings
 

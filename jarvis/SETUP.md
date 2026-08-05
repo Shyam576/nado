@@ -57,9 +57,13 @@ python -m pip install -r requirements.txt
 
 ---
 
-## 3. Install & Start Ollama (the free local LLM)
+## 3. Install Ollama and pull a model (the free local LLM)
 
-**No API key needed** — Ollama runs 100 % on your machine.
+**No API key needed.** Ollama is used here only to *download and store* the
+model file — `brain.py` loads that GGUF file directly via
+`llama-cpp-python` and runs inference itself, so **the Ollama server
+(`ollama serve`) does not need to be running**. You still need the `ollama`
+CLI once, to pull the model into its local blob store.
 
 ### macOS
 
@@ -70,11 +74,9 @@ brew install ollama
 # Option B — download the .dmg from https://ollama.com/download
 # then drag Ollama to Applications and launch it
 
-# Pull a model (llama3.2 is small and fast, ~2 GB)
+# Pull a model (llama3.2 is small and fast, ~2 GB) — this is the only step
+# that matters; brain.py reads the resulting blob directly afterwards.
 ollama pull llama3.2
-
-# Start the server (skip if you launched the macOS app — it auto-starts)
-ollama serve
 ```
 
 ### Linux
@@ -85,23 +87,19 @@ curl -fsSL https://ollama.com/install.sh | sh
 
 # 2. Pull a model
 ollama pull llama3.2
-
-# 3. Start the server
-ollama serve
 ```
 
 ### Windows
 
 1. Download the installer from **[ollama.com/download](https://ollama.com/download)**
-2. Run it — Ollama starts automatically as a background service
-3. Open a terminal and pull a model:
+2. Run it, then open a terminal and pull a model:
 
 ```powershell
 ollama pull llama3.2
 ```
 
 > **Alternative lighter models:** `phi3` (~2 GB), `gemma3:1b` (~0.8 GB), `qwen2.5:3b` (~2 GB)  
-> Change the model anytime by editing `OLLAMA_MODEL` in `config.py`.
+> Change the model anytime by editing `OLLAMA_MODEL` in `config.py`, then re-run `ollama pull <model>`.
 
 ---
 
@@ -111,7 +109,7 @@ This stack is entirely free and runs offline:
 
 | Component | Technology | Cost |
 |---|---|---|
-| LLM brain | Ollama (local) | Free |
+| LLM brain | llama-cpp-python (local, model file fetched via `ollama pull`) | Free |
 | Text-to-Speech | pyttsx3 (OS engine) | Free |
 | Speech-to-Text | Google Web Speech via SpeechRecognition | Free |
 | Wake word | Speech-based keyword detection | Free |
@@ -122,8 +120,6 @@ No `.env` file needed, no accounts to create.
 ---
 
 ## 5. Running Nado
-
-**Make sure `ollama serve` is running in another terminal first.**
 
 Navigate into the `jarvis/` directory:
 
@@ -170,7 +166,7 @@ Type `quit` or `exit` to stop.
 ```
 jarvis/
 ├── main.py          # Entry point — speech wake word loop + voice pipeline
-├── brain.py         # Ollama LLM wrapper with rolling conversation memory
+├── brain.py         # llama-cpp-python LLM wrapper with rolling conversation memory
 ├── actions.py       # PC / computer control action handlers
 ├── voice.py         # STT (SpeechRecognition) and TTS (pyttsx3 offline)
 ├── config.py        # All constants — no secrets needed
@@ -185,8 +181,7 @@ jarvis/
 | Problem | Fix |
 |---|---|
 | `OSError: [Errno -9996] Invalid input device` | Check your microphone is connected and permitted |
-| `ConnectionRefusedError` / can't reach Ollama | Run `ollama serve` in a separate terminal |
-| `model not found` error | Run `ollama pull llama3.2` |
+| `FileNotFoundError: Cannot find GGUF blob` | Run `ollama pull llama3.2` (or whatever `OLLAMA_MODEL` is set to) — brain.py reads the model straight out of Ollama's local blob store, no server needed |
 | Wake word rarely triggers | Speak clearly; adjust `energy_threshold` in `voice.py` |
 | PyAudio install fails on macOS | Run `brew install portaudio` first |
 | No sound from pyttsx3 on Linux | Run `sudo apt install espeak` |

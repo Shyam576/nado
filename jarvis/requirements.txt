@@ -6,8 +6,11 @@
 #   Ubuntu  → sudo apt install portaudio19-dev python3-pyaudio -y
 #   Windows → pip install pipwin && pipwin install pyaudio
 
-# Local LLM client (talks to Ollama server)
-ollama>=0.3.0
+# Local LLM inference — brain.py loads the GGUF model file directly (no
+# Ollama server needed at runtime). You still need the separate `ollama` CLI
+# app (brew install ollama / ollama.com/download) to run `ollama pull
+# <model>` once, which populates the local blob store this reads from.
+llama-cpp-python>=0.3.0
 
 # Terminal TUI (voice mode full-screen display)
 rich>=13.0.0
