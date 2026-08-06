@@ -112,3 +112,65 @@ def test_set_category_rejects_wrong_owner():
 
     outcome = expenses.set_category("someone_else", [str(row["id"]), "Food"])
     assert "No expense" in outcome
+
+
+def test_correct_expense_fixes_amount_and_category_via_description():
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO expenses (chat_id, amount, category, created_at) VALUES (?, NULL, 'Miscellaneous', ?)",
+            ("owner", datetime.datetime.now().isoformat()),
+        )
+        expense_id = conn.execute("SELECT id FROM expenses WHERE chat_id = ?", ("owner",)).fetchone()[0]
+
+    result = expenses.correct_expense("owner", None, 150.0, "vegetables")
+    assert f"Expense #{expense_id} amount corrected to 150.00" in result
+    # _classify_category is mocked to always return "Miscellaneous" in this
+    # file (see _no_llm_classification fixture) — real classification into
+    # "Food" was already verified manually against the live LLM.
+    assert f"Expense #{expense_id} updated: vegetables [Miscellaneous]" in result
+
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT amount, remarks, category FROM expenses WHERE id = ?", (expense_id,)
+        ).fetchone()
+    assert row["amount"] == 150.0
+    assert row["remarks"] == "vegetables"
+
+
+def test_correct_expense_defaults_to_most_recent_when_id_omitted():
+    expenses.add_expense_from_text("owner", ["100", "old", "one"])
+    expenses.add_expense_from_text("owner", ["200", "newest", "one"])
+    with get_connection() as conn:
+        newest_id = conn.execute(
+            "SELECT id FROM expenses WHERE chat_id = ? ORDER BY created_at DESC LIMIT 1", ("owner",)
+        ).fetchone()[0]
+
+    result = expenses.correct_expense("owner", None, 250.0, None)
+    assert f"Expense #{newest_id} amount corrected to 250.00" in result
+
+
+def test_correct_expense_requires_amount_or_description():
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO expenses (chat_id, amount, category, created_at) VALUES (?, 100, 'Food', ?)",
+            ("owner", datetime.datetime.now().isoformat()),
+        )
+    assert "Tell me what to change" in expenses.correct_expense("owner", None, None, None)
+
+
+def test_correct_expense_reports_no_expenses_yet():
+    assert "don't have any expenses" in expenses.correct_expense("owner", None, 100.0, "lunch")
+
+
+def test_correct_expense_rejects_wrong_owner_for_description():
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO expenses (chat_id, amount, category, created_at) VALUES (?, 100, 'Food', ?)",
+            ("someone_else", datetime.datetime.now().isoformat()),
+        )
+        expense_id = conn.execute(
+            "SELECT id FROM expenses WHERE chat_id = ?", ("someone_else",)
+        ).fetchone()[0]
+
+    result = expenses.correct_expense("owner", expense_id, None, "vegetables")
+    assert "No expense" in result

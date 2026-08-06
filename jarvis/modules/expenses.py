@@ -346,6 +346,72 @@ def list_expenses(chat_id: str = "", args: Optional[list[str]] = None) -> str:
     return "\n".join(lines)
 
 
+def _most_recent_expense_id(chat_id: str) -> Optional[int]:
+    """Return the ID of this chat's most recently logged expense, or None if none exist."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id FROM expenses WHERE chat_id = ? ORDER BY created_at DESC LIMIT 1",
+            (chat_id,),
+        ).fetchone()
+    return row["id"] if row else None
+
+
+def correct_expense(
+    chat_id: str,
+    expense_id: Optional[int],
+    amount: Optional[float],
+    description: Optional[str],
+) -> str:
+    """Correct an expense's amount and/or what it was for, in plain language.
+
+    Unlike set_category() (which requires an exact category name from
+    CATEGORIES), `description` is freeform — e.g. "vegetables", "lunch with
+    team" — and gets re-classified through the same LLM category classifier
+    used when an expense is first logged, so the user never needs to know
+    or type an exact category name.
+
+    Args:
+        chat_id: The owner attempting the correction (ownership check).
+        expense_id: The expense to correct, or None to target the most
+                    recently logged one.
+        amount: New amount, or None to leave the amount unchanged.
+        description: What the expense was actually for, or None to leave it
+                     unchanged. Also becomes the expense's new remarks.
+
+    Returns:
+        A confirmation (one line per field corrected), or an error/usage message.
+    """
+    if expense_id is None:
+        expense_id = _most_recent_expense_id(chat_id)
+        if expense_id is None:
+            return "You don't have any expenses logged yet."
+
+    if amount is None and not description:
+        return "Tell me what to change — an amount, what it was for, or both."
+
+    results = []
+    if amount is not None:
+        results.append(set_amount(chat_id, [str(expense_id), str(amount)]))
+
+    if description:
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT chat_id, recipient FROM expenses WHERE id = ?", (expense_id,)
+            ).fetchone()
+        if row is None or row["chat_id"] != chat_id:
+            results.append(f"No expense #{expense_id} found.")
+        else:
+            category = _classify_category(row["recipient"], description)
+            with get_connection() as conn:
+                conn.execute(
+                    "UPDATE expenses SET remarks = ?, category = ? WHERE id = ?",
+                    (description, category, expense_id),
+                )
+            results.append(f"Expense #{expense_id} updated: {description} [{category}].")
+
+    return "\n".join(results)
+
+
 def set_amount(chat_id: str = "", args: Optional[list[str]] = None) -> str:
     """Manually correct the amount of a previously logged expense.
 

@@ -108,6 +108,7 @@ _CLASSIFIER_SYSTEM = """You classify one user message into an intent. Reply with
 
 Intents and their required fields:
   {"intent": "add_expense", "amount": <number>, "description": "<what it was for>"}
+  {"intent": "correct_expense", "expense_id": <number, or null for the most recently logged expense>, "amount": <number, or null>, "description": "<what it was actually for, or null>"}
   {"intent": "add_task", "title": "<task title>"}
   {"intent": "list_tasks"}
   {"intent": "complete_task", "task_id": <number>}
@@ -151,9 +152,19 @@ Rules:
 - recall is for "what did I log/spend/say about X" questions looking back at history — extract
   just the single core topic word as keyword, not the whole question.
 - restart_deployment is never executed immediately — it always asks for confirmation first.
+- correct_expense fixes the amount and/or description of an already-logged expense — use it when
+  the user says an expense was wrong, e.g. "that was actually X" / "fix expense N" / "the last one
+  was for X". description is always freeform (what it was for), NEVER a fixed category name — the
+  category gets re-classified automatically from the description, same as when an expense is first
+  logged. Only set expense_id when the user names one explicitly; otherwise use null to mean "the
+  most recently logged expense".
 
 Examples:
 "spent 250 on coffee" -> {"intent": "add_expense", "amount": 250, "description": "coffee"}
+"that last expense was actually 150 for vegetables" -> {"intent": "correct_expense", "expense_id": null, "amount": 150, "description": "vegetables"}
+"fix expense 55, it was for vegetables" -> {"intent": "correct_expense", "expense_id": 55, "amount": null, "description": "vegetables"}
+"the amount on my last expense should be 150" -> {"intent": "correct_expense", "expense_id": null, "amount": 150, "description": null}
+"expense 46 was drinks not snooker" -> {"intent": "correct_expense", "expense_id": 46, "amount": null, "description": "drinks"}
 "how much have I spent this month" -> {"intent": "budget_status"}
 "show my recent expenses" -> {"intent": "list_expenses"}
 "add a task to renew my passport" -> {"intent": "add_task", "title": "renew my passport"}
@@ -229,6 +240,17 @@ def _dispatch_add_expense(chat_id: str, data: dict) -> Optional[IntentReply]:
         return None
     description = str(data.get("description", "")).strip()
     return IntentReply(expenses.add_expense_from_text(chat_id, [str(amount)] + description.split()))
+
+
+def _dispatch_correct_expense(chat_id: str, data: dict) -> Optional[IntentReply]:
+    expense_id = data.get("expense_id")
+    if expense_id is not None and not isinstance(expense_id, int):
+        return None
+    amount = data.get("amount")
+    if amount is not None and not isinstance(amount, (int, float)):
+        return None
+    description = str(data.get("description") or "").strip() or None
+    return IntentReply(expenses.correct_expense(chat_id, expense_id, amount, description))
 
 
 def _dispatch_add_task(chat_id: str, data: dict) -> Optional[IntentReply]:
@@ -358,6 +380,7 @@ def _text_handler(func: Callable[[str], str]) -> Callable[[str, dict], Optional[
 
 _DISPATCH: dict[str, Callable[[str, dict], Optional[IntentReply]]] = {
     "add_expense": _dispatch_add_expense,
+    "correct_expense": _dispatch_correct_expense,
     "add_task": _dispatch_add_task,
     "complete_task": _dispatch_complete_task,
     "set_reminder": _dispatch_set_reminder,
