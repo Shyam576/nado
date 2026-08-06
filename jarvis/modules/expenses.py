@@ -119,13 +119,23 @@ def _extract_fields(ocr_text: str) -> dict:
                 {"role": "system", "content": _EXTRACT_SYSTEM},
                 {"role": "user", "content": ocr_text},
             ],
-            max_tokens=200,
+            # Headroom above what a 4-field JSON object needs — the model
+            # sometimes pretty-prints with indentation/whitespace instead of
+            # compact JSON, which costs more tokens for the same data.
+            # Verified: at 200 this occasionally truncated mid-object,
+            # producing invalid JSON with no closing brace.
+            max_tokens=300,
             # 0.0, not 0.1 — this is structured field extraction with exactly
             # one correct answer per field, not a task with room for
             # variation. Verified 0.1 occasionally mis-transcribes a numeric
             # amount (e.g. "150.00" -> "15000") across repeated runs on the
             # same OCR text; 0.0 removes that source of non-determinism.
             temperature=0.0,
+            # Grammar-constrained JSON output (same as modules/intent.py's
+            # classifier) — guarantees syntactically valid, closed JSON
+            # regardless of how the model chooses to format it, rather than
+            # hoping free-text generation happens to stay well-formed.
+            response_format={"type": "json_object"},
         )
         raw = response["choices"][0]["message"]["content"].strip()
         parsed = json.loads(raw)
@@ -135,7 +145,7 @@ def _extract_fields(ocr_text: str) -> dict:
             "date": parsed.get("date"),
             "remarks": parsed.get("remarks"),
         }
-    except (json.JSONDecodeError, KeyError, Exception) as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         logger.exception("Field extraction failed: %s", exc)
         return {"amount": None, "recipient": None, "date": None, "remarks": None}
 
