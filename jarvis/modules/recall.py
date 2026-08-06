@@ -89,6 +89,16 @@ def _search_habits(chat_id: str, keyword: str) -> list[str]:
     return [f"  {row['habit']} — {_short_date(row['completed_at'])}" for row in rows]
 
 
+def _search_notes(chat_id: str, keyword: str) -> list[str]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT text, created_at FROM notes "
+            "WHERE chat_id = ? AND text LIKE ? ORDER BY created_at DESC LIMIT ?",
+            (chat_id, f"%{keyword}%", _MAX_RESULTS_PER_CATEGORY),
+        ).fetchall()
+    return [f"  {row['text']} ({_short_date(row['created_at'])})" for row in rows]
+
+
 def recall(chat_id: str = "", args: Optional[list[str]] = None) -> str:
     """Search tasks/expenses/mood/habit history for a keyword.
 
@@ -112,6 +122,7 @@ def recall(chat_id: str = "", args: Optional[list[str]] = None) -> str:
         ("Expenses", _search_expenses(chat_id, keyword)),
         ("Mood", _search_mood(chat_id, keyword)),
         ("Habits", _search_habits(chat_id, keyword)),
+        ("Notes", _search_notes(chat_id, keyword)),
     ]
 
     lines = [f"Results for “{keyword}”:"]

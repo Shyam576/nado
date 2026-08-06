@@ -32,7 +32,7 @@ from bot import notifier
 from bot.commands import dispatch
 from brain import ask
 from config import OWNER_ID, TELEGRAM_ALLOWED_CHAT_IDS, TELEGRAM_BOT_TOKEN
-from modules import devops, digest, email_watcher, expenses, finance, habits, intent, nudges, tasks, transcription
+from modules import activity, devops, digest, email_watcher, expenses, finance, habits, intent, nudges, tasks, transcription
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,7 @@ BUDGET_PACING_POLL_SECONDS = 3600  # hourly — threshold state in nudges.py pre
 EVENING_NUDGE_HOUR = 21  # 9 PM — late enough that "no expenses today" is meaningful
 STALE_TASK_HOUR = 10  # mid-morning, when acting on a task nudge is most likely
 K8S_HEALTH_POLL_SECONDS = 900  # 15 minutes — devops issues deserve faster detection than daily checks
+ACTIVITY_SAMPLE_POLL_SECONDS = activity.SAMPLE_INTERVAL_MINUTES * 60
 
 
 async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -247,6 +248,17 @@ async def _check_new_emails(context: ContextTypes.DEFAULT_TYPE) -> None:
         await notifier.broadcast(alert)
 
 
+async def _sample_activity(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job-queue callback: record the frontmost app/window, and nudge on a long stretch."""
+    try:
+        activity.sample_frontmost(OWNER_ID)
+        nudge = activity.check_long_stretch(OWNER_ID)
+        if nudge:
+            await notifier.broadcast(nudge)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Activity sampling failed: %s", exc)
+
+
 async def _record_price_snapshots(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Job-queue callback: store an hourly gold/TER price snapshot for digest.py."""
     try:
@@ -273,6 +285,16 @@ async def _send_evening_expense_nudge(context: ContextTypes.DEFAULT_TYPE) -> Non
             await notifier.broadcast(nudge)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Evening expense nudge failed: %s", exc)
+
+
+async def _send_activity_recap(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job-queue callback: proactively recap today's activity in the evening, unprompted."""
+    try:
+        summary = activity.today_summary(OWNER_ID)
+        if summary != "No activity data for today yet.":
+            await notifier.broadcast(summary)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Activity recap failed: %s", exc)
 
 
 async def _send_stale_task_nudge(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -327,6 +349,9 @@ def build_application() -> Application:
         _check_k8s_health, interval=K8S_HEALTH_POLL_SECONDS, first=K8S_HEALTH_POLL_SECONDS
     )
     application.job_queue.run_repeating(
+        _sample_activity, interval=ACTIVITY_SAMPLE_POLL_SECONDS, first=ACTIVITY_SAMPLE_POLL_SECONDS
+    )
+    application.job_queue.run_repeating(
         _check_budget_pacing, interval=BUDGET_PACING_POLL_SECONDS, first=BUDGET_PACING_POLL_SECONDS
     )
     local_tz = datetime.datetime.now().astimezone().tzinfo
@@ -336,6 +361,10 @@ def build_application() -> Application:
     application.job_queue.run_daily(
         _send_evening_expense_nudge,
         time=datetime.time(hour=EVENING_NUDGE_HOUR, minute=0, tzinfo=local_tz),
+    )
+    application.job_queue.run_daily(
+        _send_activity_recap,
+        time=datetime.time(hour=EVENING_NUDGE_HOUR, minute=15, tzinfo=local_tz),
     )
     application.job_queue.run_daily(
         _send_stale_task_nudge,

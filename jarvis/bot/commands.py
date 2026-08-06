@@ -9,6 +9,7 @@ through to the LLM chat path in bot/telegram_bot.py.
 from typing import Callable
 
 from modules import (
+    activity,
     calendar_app,
     communication,
     decision,
@@ -18,6 +19,7 @@ from modules import (
     expenses,
     finance,
     habits,
+    notes,
     projects,
     recall,
     system,
@@ -129,6 +131,7 @@ def _handle_daily_reminder(chat_id: str, args: list[str]) -> str:
 HELP_TEXT: dict[str, str] = {
     "/today": "/today — pending task count + reminders due today",
     "/calendar": "/calendar — today's events from macOS Calendar.app",
+    "/activity": "/activity — today's frontmost-app time breakdown",
     "/tasks": "/tasks [add <title> | done <id>] — list, add, or complete tasks",
     "/remind": "/remind <minutes> <message> — schedule a one-off reminder",
     "/dailyremind": "/dailyremind <HH:MM> <message> | status | cancel — recurring daily reminder (replaces the previous one)",
@@ -144,6 +147,8 @@ HELP_TEXT: dict[str, str] = {
     "/draft-email": "/draft-email <what to say> — draft an email via LLM",
     "/rewrite": "/rewrite [tone] <text> — rewrite text in a different tone (professional/casual/formal/friendly/concise/assertive)",
     "/notes": "/notes <raw text> — summarise meeting notes + auto-create action items as tasks",
+    "/note": "/note <text> — jot down a quick thought verbatim, no structure needed",
+    "/journal": "/journal [N] — list your recent /note entries",
     "/decide": "/decide <question> — decision support, grounded in your tasks/prices",
     "/mood": "/mood <mood> [1-10] [note] | /mood history — log or view mood entries",
     "/habit": "/habit <name> | /habit status [name] — log a habit or check streaks",
@@ -162,6 +167,7 @@ HELP_TEXT: dict[str, str] = {
 COMMANDS: dict[str, Callable[[str, list[str]], str]] = {
     "/today": lambda chat_id, args: tasks.today_summary(chat_id),
     "/calendar": lambda chat_id, args: calendar_app.today_events(chat_id, args),
+    "/activity": lambda chat_id, args: activity.today_summary(chat_id, args),
     "/tasks": _handle_tasks,
     "/remind": lambda chat_id, args: tasks.add_reminder(chat_id, args),
     "/dailyremind": _handle_daily_reminder,
@@ -177,6 +183,8 @@ COMMANDS: dict[str, Callable[[str, list[str]], str]] = {
     "/draft-email": lambda chat_id, args: communication.draft_email(chat_id, args),
     "/rewrite": lambda chat_id, args: communication.rewrite_message(chat_id, args),
     "/notes": lambda chat_id, args: communication.process_meeting_notes(chat_id, args),
+    "/note": lambda chat_id, args: notes.add_note(chat_id, args),
+    "/journal": lambda chat_id, args: notes.list_notes(chat_id, args),
     "/decide": lambda chat_id, args: decision.decide(chat_id, args),
     "/mood": _handle_mood,
     "/habit": _handle_habit,

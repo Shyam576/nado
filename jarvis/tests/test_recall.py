@@ -84,3 +84,15 @@ def test_recall_limits_results_per_category():
 
     result = recall.recall("owner", ["gold"])
     assert result.count("gold task") == recall._MAX_RESULTS_PER_CATEGORY
+
+
+def test_recall_finds_matching_note():
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO notes (chat_id, text, created_at) VALUES (?, 'gold price hit my target today', ?)",
+            ("owner", datetime.datetime.now().isoformat()),
+        )
+
+    result = recall.recall("owner", ["gold"])
+    assert "Notes:" in result
+    assert "gold price hit my target today" in result

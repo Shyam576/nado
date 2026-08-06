@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 import command_confirmation
-from modules import calendar_app, devops, digest, expenses, finance, projects, recall, system, tasks
+from modules import calendar_app, devops, digest, expenses, finance, notes, projects, recall, system, tasks
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +110,7 @@ Intents and their required fields:
   {"intent": "add_expense", "amount": <number>, "description": "<what it was for>"}
   {"intent": "correct_expense", "expense_id": <number, or null for the most recently logged expense>, "amount": <number, or null>, "description": "<what it was actually for, or null>"}
   {"intent": "add_task", "title": "<task title>"}
+  {"intent": "add_note", "text": "<the note, verbatim>"}
   {"intent": "list_tasks"}
   {"intent": "complete_task", "task_id": <number>}
   {"intent": "set_reminder", "minutes": <number>, "message": "<reminder text>"}
@@ -151,6 +152,10 @@ Rules:
   wants to know what an error/message/dialog on screen says or means, or wants help fixing it.
 - recall is for "what did I log/spend/say about X" questions looking back at history — extract
   just the single core topic word as keyword, not the whole question.
+- add_note is for a freeform thought/observation with no action implied ("note to self...",
+  "remember that...", "just so you know...", "thinking out loud..."). add_task is only for
+  something the user explicitly wants to DO. When in doubt whether it's a thought or a to-do,
+  prefer add_note — it's meant to be zero-friction, no wrong way to use it.
 - restart_deployment is never executed immediately — it always asks for confirmation first.
 - correct_expense fixes the amount and/or description of an already-logged expense — use it when
   the user says an expense was wrong, e.g. "that was actually X" / "fix expense N" / "the last one
@@ -168,6 +173,8 @@ Examples:
 "how much have I spent this month" -> {"intent": "budget_status"}
 "show my recent expenses" -> {"intent": "list_expenses"}
 "add a task to renew my passport" -> {"intent": "add_task", "title": "renew my passport"}
+"note to self, the wifi password is on the router" -> {"intent": "add_note", "text": "the wifi password is on the router"}
+"remember that my landlord said rent is due on the 5th" -> {"intent": "add_note", "text": "landlord said rent is due on the 5th"}
 "what's on my plate today" -> {"intent": "daily_summary"}
 "what's on my calendar today" -> {"intent": "calendar_today"}
 "do I have any meetings today" -> {"intent": "calendar_today"}
@@ -258,6 +265,13 @@ def _dispatch_add_task(chat_id: str, data: dict) -> Optional[IntentReply]:
     if not title:
         return None
     return IntentReply(tasks.add_task(chat_id, title.split()))
+
+
+def _dispatch_add_note(chat_id: str, data: dict) -> Optional[IntentReply]:
+    text = str(data.get("text", "")).strip()
+    if not text:
+        return None
+    return IntentReply(notes.add_note(chat_id, text.split()))
 
 
 def _dispatch_complete_task(chat_id: str, data: dict) -> Optional[IntentReply]:
@@ -382,6 +396,7 @@ _DISPATCH: dict[str, Callable[[str, dict], Optional[IntentReply]]] = {
     "add_expense": _dispatch_add_expense,
     "correct_expense": _dispatch_correct_expense,
     "add_task": _dispatch_add_task,
+    "add_note": _dispatch_add_note,
     "complete_task": _dispatch_complete_task,
     "set_reminder": _dispatch_set_reminder,
     "set_daily_reminder": _dispatch_set_daily_reminder,

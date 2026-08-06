@@ -10,16 +10,17 @@ and also available on-demand via /digest.
 import datetime
 import logging
 
-from modules import calendar_app, expenses, finance, habits, tasks
+from modules import calendar_app, expenses, finance, habits, notes, tasks
 
 logger = logging.getLogger(__name__)
 
 _WEEKLY_REVIEW_SYSTEM = (
     "You are Jarvis's weekly-review brain. Given the user's last 7 days of tasks "
-    "completed, mood entries, habit adherence, and expenses by category, write a short "
-    "(3-5 sentence) reflective summary. Point out genuine patterns you can see in the data "
-    "(e.g. spending spikes in a category, mood trends, low task throughput, a habit lapse "
-    "coinciding with a mood dip) — don't just restate the numbers. If the data is too sparse "
+    "completed, mood entries, habit adherence, expenses by category, and freeform notes "
+    "jotted down during the week, write a short (3-5 sentence) reflective summary. Point out "
+    "genuine patterns you can see in the data (e.g. spending spikes in a category, mood trends, "
+    "low task throughput, a habit lapse coinciding with a mood dip, a note that connects to "
+    "something else in the data) — don't just restate the numbers. If the data is too sparse "
     "to say anything meaningful, say so plainly rather than inventing a pattern. Plain text "
     "only, no markdown."
 )
@@ -100,6 +101,10 @@ def build_weekly_review(chat_id: str = "", args: list[str] | None = None) -> str
         context_lines.append(f"Expenses this week ({expense_stats['total']:,.2f} BTN total): {cat_line}")
     else:
         context_lines.append("No expenses logged this week.")
+
+    weekly_notes = notes.weekly_notes(chat_id)
+    if weekly_notes:
+        context_lines.append("Notes jotted down this week: " + "; ".join(weekly_notes))
 
     context = "\n".join(context_lines)
 

@@ -87,6 +87,21 @@ CREATE TABLE IF NOT EXISTS expenses (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS activity_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    app_name TEXT NOT NULL,
+    window_title TEXT,
+    captured_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_tasks_chat_status ON tasks (chat_id, status);
 CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders (delivered, fire_at);
 CREATE INDEX IF NOT EXISTS idx_mood_log_chat ON mood_log (chat_id, created_at);
@@ -94,6 +109,8 @@ CREATE INDEX IF NOT EXISTS idx_habit_log_chat_habit ON habit_log (chat_id, habit
 CREATE INDEX IF NOT EXISTS idx_price_snapshots_symbol_time ON price_snapshots (symbol, recorded_at);
 CREATE INDEX IF NOT EXISTS idx_expenses_chat_created ON expenses (chat_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_daily_reminders_chat_enabled ON daily_reminders (chat_id, enabled);
+CREATE INDEX IF NOT EXISTS idx_activity_log_chat_captured ON activity_log (chat_id, captured_at);
+CREATE INDEX IF NOT EXISTS idx_notes_chat_created ON notes (chat_id, created_at);
 """
 
 # Allowed task status transitions — no arbitrary status writes (AGENTS.md §14).
