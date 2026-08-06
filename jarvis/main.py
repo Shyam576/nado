@@ -249,10 +249,13 @@ def bot_mode() -> None:
     """Run Jarvis as a chat bot across every configured transport. Press Ctrl-C to exit."""
     import asyncio
 
+    import watchdog
     from config import validate_bot_config
 
     for warning in validate_bot_config():
         logger.warning(warning)
+
+    watchdog.install()
 
     try:
         asyncio.run(_run_bot_transports())
