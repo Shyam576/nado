@@ -44,7 +44,10 @@ _EXTRACT_SYSTEM = (
     "You extract structured data from OCR text of a mobile banking payment "
     "confirmation screenshot. The OCR may contain noise/garbled characters.\n\n"
     "Return ONLY a JSON object with these exact keys:\n"
-    "  amount: number (the transaction amount, digits only, no currency symbol or commas)\n"
+    "  amount: number (the transaction amount as a plain decimal, e.g. 'Nu. 150.00' -> 150.00. "
+    "Strip the currency symbol and thousands-separating commas, but ALWAYS keep the decimal "
+    "point — never merge the fractional part into the whole number, e.g. 150.00 is 150.00, "
+    "never 15000)\n"
     "  recipient: string — the money's DESTINATION only. Look specifically for a field "
     "labelled 'To', 'Beneficiary name', or similar. NEVER use a 'From'/'From Account' name "
     "here even if it appears first in the text. If only a bank name is present with no "
@@ -60,11 +63,14 @@ _EXTRACT_SYSTEM = (
 _CATEGORY_SYSTEM = (
     "Classify this expense into exactly one of the following categories, based on the "
     "recipient name and remarks given. Categories:\n" + "\n".join(f"- {c}" for c in CATEGORIES) + "\n\n"
-    "Guidance: 'Investment/Gold' covers gold/precious-metal purchases. 'Family Support' covers "
-    "money sent to family members. 'Drinking' covers alcohol/bars. 'Junk' covers snacks/fast food "
-    "(distinct from 'Food' which is regular meals/groceries). 'Snooker' covers snooker/pool halls. "
-    "'Miscellaneous' is for anything that doesn't clearly fit another category — use it rather than "
-    "forcing a poor fit.\n\n"
+    "Guidance: 'Food' covers meals, restaurants, groceries, lunch/dinner/breakfast. 'Transport' "
+    "covers taxis, buses, fuel, ride-hailing. 'Utilities/Bills' covers phone/mobile data recharges, "
+    "electricity, water, internet, rent. 'Health' covers pharmacy, doctor, hospital, medicine. "
+    "'Investment/Gold' covers gold/precious-metal purchases. 'Family Support' covers money sent to "
+    "family members. 'Drinking' covers alcohol/bars. 'Junk' covers snacks/fast food (distinct from "
+    "'Food' which is regular meals/groceries). 'Snooker' covers snooker/pool halls. 'Miscellaneous' "
+    "is for anything that doesn't clearly fit another category — use it rather than forcing a poor "
+    "fit.\n\n"
     "Respond with ONLY the exact category name from the list above, nothing else."
 )
 
@@ -78,8 +84,19 @@ def _preprocess(image_path: str) -> Image.Image:
 
 
 def _ocr(image_path: str) -> str:
-    """Run OCR on a screenshot, after contrast-improving preprocessing."""
-    return pytesseract.image_to_string(_preprocess(image_path))
+    """Run OCR on a screenshot, after contrast-improving preprocessing.
+
+    Forces PSM 6 ("assume a single uniform block of text") rather than
+    tesseract's default auto page-segmentation (PSM 3). Verified against
+    real banking-app screenshots (two-column "label : value" layouts):
+    PSM 3 inconsistently reorders text into two separate blocks — all
+    labels, then all values, in a different order — which silently
+    disconnects a field like "Purpose/Bill QR:" from its actual value
+    ("Lunch"), causing _extract_fields() to return remarks=None even
+    though the text was captured. PSM 6 reliably keeps each label next to
+    its value on one line instead.
+    """
+    return pytesseract.image_to_string(_preprocess(image_path), config="--psm 6")
 
 
 def _extract_fields(ocr_text: str) -> dict:
@@ -103,7 +120,12 @@ def _extract_fields(ocr_text: str) -> dict:
                 {"role": "user", "content": ocr_text},
             ],
             max_tokens=200,
-            temperature=0.1,
+            # 0.0, not 0.1 — this is structured field extraction with exactly
+            # one correct answer per field, not a task with room for
+            # variation. Verified 0.1 occasionally mis-transcribes a numeric
+            # amount (e.g. "150.00" -> "15000") across repeated runs on the
+            # same OCR text; 0.0 removes that source of non-determinism.
+            temperature=0.0,
         )
         raw = response["choices"][0]["message"]["content"].strip()
         parsed = json.loads(raw)
@@ -143,9 +165,21 @@ def _classify_category(recipient: Optional[str], remarks: Optional[str]) -> str:
             temperature=0.1,
         )
         answer = response["choices"][0]["message"]["content"].strip()
+        # Strip stray wrapping punctuation/quotes the model sometimes adds
+        # despite being told to answer with only the category name — an
+        # exact-match-only check would otherwise silently default to
+        # Miscellaneous over something as trivial as a trailing period.
+        cleaned = answer.strip(" .!\"'`")
         for category in CATEGORIES:
-            if category.lower() == answer.lower():
+            if category.lower() == cleaned.lower():
                 return category
+        # Last resort: the model named a category somewhere in a longer
+        # answer (e.g. it ignored the "nothing else" instruction) — accept
+        # it only if exactly one category name appears as a substring, to
+        # avoid guessing between two.
+        contained = [c for c in CATEGORIES if c.lower() in cleaned.lower()]
+        if len(contained) == 1:
+            return contained[0]
         logger.warning("Category classification returned unrecognised value: %r", answer)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Category classification failed: %s", exc)
