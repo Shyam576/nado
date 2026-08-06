@@ -74,9 +74,9 @@ _SCREENSHOT_RE = re.compile(
 # ---------------------------------------------------------------------------
 
 
-def _check_pending_confirmation(chat_id: str, text: str) -> Optional[IntentReply]:
+def _check_pending_confirmation(chat_id: str, text: str, allow_execution: bool = True) -> Optional[IntentReply]:
     """Resolve a parked run_command if this message confirms or cancels it."""
-    result = command_confirmation.check(chat_id, text)
+    result = command_confirmation.check(chat_id, text, allow_execution=allow_execution)
     return IntentReply(result) if result is not None else None
 
 
@@ -396,12 +396,18 @@ _DISPATCH: dict[str, Callable[[str, dict], Optional[IntentReply]]] = {
 # ---------------------------------------------------------------------------
 
 
-def route(chat_id: str, text: str) -> Optional[IntentReply]:
+def route(chat_id: str, text: str, allow_execution: bool = True) -> Optional[IntentReply]:
     """Try to handle plain text as an actionable intent.
 
     Args:
         chat_id: The canonical owner ID (config.OWNER_ID).
         text: The raw message text (already checked to not be a slash command).
+        allow_execution: False when `text` is being processed via replay
+            (e.g. Discord catch-up after a reconnect) rather than live.
+            Staging a new run_command/restart request is still fine during
+            replay (it's inert until confirmed) — this only affects whether
+            a matching "yes" is allowed to actually confirm one. See
+            command_confirmation.check()'s docstring for the exact risk.
 
     Returns:
         An IntentReply if an intent was recognised and executed, or None to
@@ -411,14 +417,14 @@ def route(chat_id: str, text: str) -> Optional[IntentReply]:
     if not text or text.startswith("/"):
         return None
 
-    confirmation = _check_pending_confirmation(chat_id, text)
+    confirmation = _check_pending_confirmation(chat_id, text, allow_execution=allow_execution)
     if confirmation is not None:
         return confirmation
 
     # Same shape as the run_command gate above, checked second — if both a
     # command and a restart were somehow staged within the same 60s window
     # (unlikely for a single-user bot), the run_command gate wins the "yes".
-    restart_confirmation = devops.check_restart_confirmation(chat_id, text)
+    restart_confirmation = devops.check_restart_confirmation(chat_id, text, allow_execution=allow_execution)
     if restart_confirmation is not None:
         return IntentReply(restart_confirmation)
 

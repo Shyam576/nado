@@ -21,7 +21,6 @@ Run with:  python main.py bot
 import logging
 import os
 import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
 
 import discord
@@ -45,18 +44,6 @@ logger = logging.getLogger(__name__)
 _DISCORD_MESSAGE_LIMIT = 2000
 _CHUNK_SIZE = 1900  # headroom under Discord's 2000-char cap
 _CATCHUP_SCAN_LIMIT = 200  # cap how far back we scan on reconnect, per channel
-
-# Only replay messages newer than this on reconnect; older ones are marked
-# seen but not processed. Without this, a long outage (laptop asleep
-# overnight, network down) followed by reconnect would run the full pipeline
-# — including expense logging, task creation, and run_command dispatch —
-# against a burst of stale, possibly no-longer-relevant messages. It also
-# closes a sharper bug: modules/intent.py's run_command confirmation gate
-# checks time.time() at processing time, not the message's original
-# timestamp, so a days-old "run <cmd>" + "yes" pair replayed back-to-back
-# would silently re-execute the moment the bot reconnects. Bounding replay
-# age means stale pairs like that are simply skipped instead.
-_CATCHUP_MAX_AGE_SECONDS = 15 * 60
 
 
 def _chunk(text: str) -> list[str]:
@@ -102,8 +89,17 @@ async def _handle_receipt_image(message: discord.Message, attachment: discord.At
         logger.exception("Failed to send Discord image reply: %s", exc)
 
 
-async def _handle_voice_attachment(message: discord.Message, attachment: discord.Attachment) -> None:
-    """Transcribe an audio/voice attachment, then process the transcript like text."""
+async def _handle_voice_attachment(
+    message: discord.Message, attachment: discord.Attachment, is_replay: bool = False
+) -> None:
+    """Transcribe an audio/voice attachment, then process the transcript like text.
+
+    Args:
+        message: The Discord message carrying the attachment.
+        attachment: The audio/voice attachment itself.
+        is_replay: False for a live message; True during catch-up replay —
+            see intent.route()'s docstring for what this changes.
+    """
     logger.info("Received audio from Discord channel_id=%s: %s", message.channel.id, attachment.filename)
 
     try:
@@ -119,7 +115,7 @@ async def _handle_voice_attachment(message: discord.Message, attachment: discord
         image_path = None
         reply = dispatch(OWNER_ID, transcript)
         if reply is None:
-            routed = intent.route(OWNER_ID, transcript)
+            routed = intent.route(OWNER_ID, transcript, allow_execution=not is_replay)
             if routed is not None:
                 reply, image_path = routed.text, routed.image_path
         if reply is None:
@@ -157,12 +153,20 @@ async def _handle_voice_attachment(message: discord.Message, attachment: discord
                 pass
 
 
-async def _process_message(message: discord.Message, client_user) -> None:
+async def _process_message(message: discord.Message, client_user, is_replay: bool = False) -> None:
     """Authenticate and handle one message — shared by live on_message and catch-up replay.
 
     Args:
         message: The Discord message to process.
         client_user: The bot's own user (to skip its own messages).
+        is_replay: False for a live message; True when this message is being
+            replayed during catch-up after a reconnect. Everything still
+            gets processed either way (expenses logged, tasks created,
+            etc.) — the one difference is that a replayed "yes"/"no" cannot
+            confirm a pending run_command/restart request, since that would
+            mean a stale confirmation pair sent while offline could silently
+            fire the moment the bot reconnects. See
+            command_confirmation.check()'s docstring for the full story.
     """
     if message.author == client_user:
         return
@@ -206,7 +210,7 @@ async def _process_message(message: discord.Message, client_user) -> None:
         a for a in message.attachments if (a.content_type or "").startswith("audio/")
     ]
     if audio_attachments:
-        await _handle_voice_attachment(message, audio_attachments[0])
+        await _handle_voice_attachment(message, audio_attachments[0], is_replay)
         return
 
     text = message.content.strip()
@@ -219,7 +223,7 @@ async def _process_message(message: discord.Message, client_user) -> None:
     try:
         reply = dispatch(OWNER_ID, text)
         if reply is None:
-            routed = intent.route(OWNER_ID, text)
+            routed = intent.route(OWNER_ID, text, allow_execution=not is_replay)
             if routed is not None:
                 reply, image_path = routed.text, routed.image_path
         if reply is None:
@@ -272,24 +276,10 @@ async def _catch_up(client: discord.Client) -> None:
 
         if last_seen and missed:
             logger.info("Catch-up: replaying %d missed message(s) in channel %s", len(missed), channel_id)
-
-        now = datetime.now(timezone.utc)
-        skipped_stale = 0
         for msg in missed:
             if last_seen:  # skip replay on the very first run — just establish the baseline
-                age_seconds = (now - msg.created_at).total_seconds()
-                if age_seconds > _CATCHUP_MAX_AGE_SECONDS:
-                    skipped_stale += 1
-                else:
-                    await _process_message(msg, client.user)
+                await _process_message(msg, client.user, is_replay=True)
             memory.set_preference(_last_seen_key(channel_id), str(msg.id))
-
-        if skipped_stale:
-            logger.warning(
-                "Catch-up: skipped %d stale message(s) older than %ds in channel %s "
-                "(marked seen, not processed) — re-send any request that's still relevant.",
-                skipped_stale, _CATCHUP_MAX_AGE_SECONDS, channel_id,
-            )
 
         if not missed:
             # Nothing missed, but still need a baseline on first run — use the

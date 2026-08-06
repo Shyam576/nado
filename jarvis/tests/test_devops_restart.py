@@ -151,3 +151,21 @@ def test_restart_confirmation_reachable_via_intent_route(monkeypatch):
     reply = intent.route("owner", "yes")
     assert reply is not None
     assert reply.text == "restarted auth-service"
+
+
+def test_restart_confirmation_blocked_during_replay(monkeypatch):
+    """A stale restart + 'yes' pair replayed on Discord reconnect must not execute."""
+    called = False
+
+    def _fail(*a, **k):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(devops, "_restart_deployment", _fail)
+
+    intent._dispatch_restart_deployment("owner", {"deployment": "auth-service", "namespace": ""})
+    reply = intent.route("owner", "yes", allow_execution=False)
+
+    assert not called
+    assert reply is not None
+    assert "catching up" in reply.text

@@ -45,6 +45,27 @@ def test_check_confirms_and_executes(monkeypatch):
     assert command_confirmation.check("owner", "yes") is None
 
 
+def test_check_with_allow_execution_false_does_not_run(monkeypatch):
+    """A replayed 'yes' (Discord catch-up) must never execute the command."""
+    called = False
+
+    def _fail(*a, **k):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(actions, "run_command", _fail)
+
+    command_confirmation.stage("owner", "echo hi")
+    result = command_confirmation.check("owner", "yes", allow_execution=False)
+
+    assert not called
+    assert "catching up" in result
+    assert "echo hi" in result
+    # Consumed regardless — a genuine live "yes" after this has nothing left
+    # to confirm; re-requesting the command from scratch is required.
+    assert command_confirmation.check("owner", "yes") is None
+
+
 def test_check_cancels():
     command_confirmation.stage("owner", "echo hi")
     result = command_confirmation.check("owner", "no")
@@ -117,3 +138,37 @@ def test_confirmation_shared_across_voice_and_bot_entry_points(monkeypatch):
     # not intent.py's — proving both share the same pending state.
     result = command_confirmation.check("owner", "yes")
     assert "hi" in result
+
+
+def test_intent_route_blocks_confirmation_during_replay(monkeypatch):
+    """A stale run_command + 'yes' pair replayed on Discord reconnect must not execute.
+
+    Regression test for the actual production bug: staging happens at
+    replay time (now), so the 60s confirmation window is always satisfied
+    when both messages replay back-to-back regardless of how old they
+    really are — allow_execution=False is what actually stops it.
+    """
+    called = False
+
+    def _fail(*a, **k):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(actions, "run_command", _fail)
+
+    intent._dispatch_run_command("owner", {"command": "echo hi"})
+    reply = intent.route("owner", "yes", allow_execution=False)
+
+    assert not called
+    assert reply is not None
+    assert "catching up" in reply.text
+
+
+def test_intent_route_allows_confirmation_when_live(monkeypatch):
+    monkeypatch.setattr(actions, "run_command", lambda cmd, **kwargs: "hi")
+
+    intent._dispatch_run_command("owner", {"command": "echo hi"})
+    reply = intent.route("owner", "yes")  # allow_execution defaults to True
+
+    assert reply is not None
+    assert "hi" in reply.text

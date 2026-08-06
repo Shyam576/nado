@@ -375,12 +375,16 @@ def request_restart(chat_id: str, deployment: str, namespace: str = "") -> str:
     )
 
 
-def check_restart_confirmation(chat_id: str, text: str) -> Optional[str]:
+def check_restart_confirmation(chat_id: str, text: str, allow_execution: bool = True) -> Optional[str]:
     """Resolve a parked restart request if `text` confirms or cancels it.
 
     Args:
         chat_id: The owner who may have a pending restart.
         text: The next message from that chat.
+        allow_execution: False when `text` is being processed via replay
+            (Discord catch-up after a reconnect) rather than live — see
+            command_confirmation.check()'s docstring for why a replayed
+            "yes" must not be allowed to trigger the restart.
 
     Returns:
         The result string if `text` was consumed as a confirm/cancel/expiry
@@ -400,6 +404,11 @@ def check_restart_confirmation(chat_id: str, text: str) -> Optional[str]:
 
     if _RESTART_CONFIRM_RE.match(text):
         del _pending_restarts[chat_id]
+        if not allow_execution:
+            return (
+                f"That confirmation for restarting '{deployment}' arrived while I was "
+                "catching up on missed messages — ask again if you still want it to run."
+            )
         return _restart_deployment(namespace, deployment)
 
     if _RESTART_CANCEL_RE.match(text):

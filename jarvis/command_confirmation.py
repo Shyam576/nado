@@ -40,18 +40,26 @@ def stage(identity: str, command: str) -> str:
     return f"Run this?\n$ {command}\nReply “yes” within {CONFIRM_WINDOW_SECONDS}s to execute, “no” to cancel."
 
 
-def check(identity: str, text: str) -> Optional[str]:
+def check(identity: str, text: str, allow_execution: bool = True) -> Optional[str]:
     """Resolve a parked command if `text` confirms or cancels it.
 
     Args:
         identity: Same identity key passed to stage().
         text: The next message/utterance from that identity.
+        allow_execution: False when `text` is being processed via replay
+            (e.g. Discord catch-up after a reconnect) rather than live —
+            in that case a matching "yes" must NOT execute the command.
+            Without this, a run_command request and its "yes" reply, both
+            sent while the bot was offline, would replay back-to-back and
+            silently re-execute the moment the bot reconnects, regardless
+            of how long ago they were actually sent. A replayed "yes"
+            requires a fresh, live confirmation instead.
 
     Returns:
         The result string if `text` was consumed as a confirm/cancel reply
-        (or as a stale reply to an expired request), or None if there is
-        nothing pending / `text` isn't a yes/no reply — callers should treat
-        None as "not a confirmation, handle this as a normal message".
+        (or as a stale/replayed reply), or None if there is nothing
+        pending / `text` isn't a yes/no reply — callers should treat None
+        as "not a confirmation, handle this as a normal message".
     """
     pending = _pending.get(identity)
     if pending is None:
@@ -66,6 +74,11 @@ def check(identity: str, text: str) -> Optional[str]:
 
     if _CONFIRM_RE.match(text):
         del _pending[identity]
+        if not allow_execution:
+            return (
+                f"That confirmation for '{command}' arrived while I was catching up on "
+                "missed messages — ask again if you still want it to run."
+            )
         import actions
         from pathlib import Path
 
