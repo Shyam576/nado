@@ -18,6 +18,7 @@ through the same _process_message() path as live messages.
 Run with:  python main.py bot
 """
 
+import asyncio
 import logging
 import os
 import tempfile
@@ -44,6 +45,17 @@ logger = logging.getLogger(__name__)
 _DISCORD_MESSAGE_LIMIT = 2000
 _CHUNK_SIZE = 1900  # headroom under Discord's 2000-char cap
 _CATCHUP_SCAN_LIMIT = 200  # cap how far back we scan on reconnect, per channel
+
+# Discord dispatches on_ready as its own asyncio task each time the gateway
+# does a fresh IDENTIFY (not just once per process) — a flaky reconnect right
+# after a laptop wake can fire it twice in quick succession. Without this
+# lock, two _catch_up() calls both read the same stale last-seen checkpoint
+# before either advances it (the first yields the event loop mid-OCR/DB
+# work), so both see the same missed screenshot/message and both replay it —
+# e.g. logging the same expense twice. Serializing means the second call
+# re-reads the checkpoint *after* the first has finished and finds nothing
+# left to replay.
+_catchup_lock = asyncio.Lock()
 
 
 def _chunk(text: str) -> list[str]:
@@ -253,7 +265,17 @@ async def _catch_up(client: discord.Client) -> None:
     whole time. Updates the "last seen" marker as it goes so nothing is
     replayed twice, and safely no-ops on first-ever run (nothing to compare
     against yet, just establishes the baseline).
+
+    Guarded by _catchup_lock so two overlapping on_ready events (e.g. a
+    flaky double-reconnect right after a laptop wake) can't both read the
+    same stale checkpoint and both replay the same missed message — see the
+    lock's docstring for the exact race this closes.
     """
+    async with _catchup_lock:
+        await _catch_up_locked(client)
+
+
+async def _catch_up_locked(client: discord.Client) -> None:
     for channel_id in DISCORD_ALLOWED_CHANNEL_IDS:
         try:
             channel = client.get_channel(channel_id) or await client.fetch_channel(channel_id)
