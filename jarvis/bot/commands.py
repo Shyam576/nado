@@ -20,6 +20,7 @@ from modules import (
     finance,
     habits,
     notes,
+    people,
     projects,
     recall,
     system,
@@ -57,6 +58,28 @@ def _handle_expenses(chat_id: str, args: list[str]) -> str:
     if args and args[0].lower() == "amount":
         return expenses.set_amount(chat_id, args[1:])
     return expenses.list_expenses(chat_id, args)
+
+
+def _handle_person(chat_id: str, args: list[str]) -> str:
+    """Route /person subcommands: list, show <name>, birthday <name> <MM-DD>,
+    contacted <name>, <name> (show), or <name> <fact> (add fact, default)."""
+    if not args:
+        return (
+            "Usage: /person <name> <fact> | list | show <name> | "
+            "birthday <name> <MM-DD> | contacted <name>"
+        )
+    sub = args[0].lower()
+    if sub == "list":
+        return people.list_people(chat_id, args[1:])
+    if sub == "show":
+        return people.show_person(chat_id, args[1:])
+    if sub == "birthday":
+        return people.set_birthday(chat_id, args[1:])
+    if sub == "contacted":
+        return people.mark_contacted(chat_id, args[1:])
+    if len(args) == 1:
+        return people.show_person(chat_id, args)
+    return people.add_fact(chat_id, args)
 
 
 def _handle_logs(chat_id: str, args: list[str]) -> str:
@@ -140,6 +163,7 @@ HELP_TEXT: dict[str, str] = {
     "/lock": "/lock — lock the laptop screen",
     "/project": "/project <name> — git branch, last commit, dirty files, containers for a repo",
     "/cleanup": "/cleanup — sort loose files in ~/Downloads into subfolders (move-only)",
+    "/backup": "/backup — snapshot the database now (also runs automatically every night)",
     "/logs": "/logs <service> [namespace] | /logs summary <service> — raw tail, or an LLM summary",
     "/restart": "/restart <deployment> [namespace] — restart a deployment (requires confirmation)",
     "/gold": "/gold [target <price> | target clear] — gold spot price / alert target",
@@ -160,6 +184,10 @@ HELP_TEXT: dict[str, str] = {
     "/categories": "/categories — list all expense categories",
     "/check-email": "/check-email — manually poll for new emails (also runs automatically every 2 minutes)",
     "/recall": "/recall <keyword> — search past tasks/expenses/mood/habits for a keyword",
+    "/person": (
+        "/person <name> <fact> | list | show <name> | birthday <name> <MM-DD> | "
+        "contacted <name> — remember facts about people, track birthdays and last contact"
+    ),
     "/help": "/help — show this list",
     "(voice)": "Send a voice note/audio file — it gets transcribed, processed like typed text, and replied to with both text and a voice note back",
 }
@@ -176,6 +204,7 @@ COMMANDS: dict[str, Callable[[str, list[str]], str]] = {
     "/lock": lambda chat_id, args: system.lock_screen(chat_id, args),
     "/project": lambda chat_id, args: projects.project_status(chat_id, args),
     "/cleanup": lambda chat_id, args: system.cleanup_downloads(chat_id, args),
+    "/backup": lambda chat_id, args: system.run_backup(chat_id, args),
     "/gold": lambda chat_id, args: finance.gold_price(chat_id, args),
     "/ter": _handle_ter,
     "/logs": _handle_logs,
@@ -196,6 +225,7 @@ COMMANDS: dict[str, Callable[[str, list[str]], str]] = {
     "/categories": lambda chat_id, args: expenses.list_categories(chat_id, args),
     "/check-email": _handle_check_email,
     "/recall": lambda chat_id, args: recall.recall(chat_id, args),
+    "/person": _handle_person,
     "/help": lambda chat_id, args: (
         "Available commands:\n"
         + "\n".join(HELP_TEXT.values())

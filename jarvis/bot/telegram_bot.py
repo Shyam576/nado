@@ -32,7 +32,7 @@ from bot import notifier
 from bot.commands import dispatch
 from brain import ask
 from config import OWNER_ID, TELEGRAM_ALLOWED_CHAT_IDS, TELEGRAM_BOT_TOKEN
-from modules import activity, devops, digest, email_watcher, expenses, finance, habits, intent, nudges, tasks, transcription
+from modules import activity, devops, digest, email_watcher, expenses, finance, habits, intent, nudges, people, tasks, transcription
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,7 @@ EVENING_NUDGE_HOUR = 21  # 9 PM — late enough that "no expenses today" is mean
 STALE_TASK_HOUR = 10  # mid-morning, when acting on a task nudge is most likely
 K8S_HEALTH_POLL_SECONDS = 900  # 15 minutes — devops issues deserve faster detection than daily checks
 ACTIVITY_SAMPLE_POLL_SECONDS = activity.SAMPLE_INTERVAL_MINUTES * 60
+PEOPLE_CHECK_POLL_SECONDS = 21600  # 6 hours — same daily-cadence reasoning as habit gaps
 
 
 async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -233,6 +234,14 @@ async def _check_habit_gaps(context: ContextTypes.DEFAULT_TYPE) -> None:
         await notifier.broadcast(alert)
 
 
+async def _check_people(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job-queue callback: broadcast on follow-up gaps and birthdays landing today."""
+    for _chat_id, alert in people.check_followups():
+        await notifier.broadcast(alert)
+    for _chat_id, alert in people.check_birthdays():
+        await notifier.broadcast(alert)
+
+
 async def _check_k8s_health(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Job-queue callback: broadcast + create a task for newly-unhealthy K8s deployments."""
     try:
@@ -338,6 +347,9 @@ def build_application() -> Application:
     )
     application.job_queue.run_repeating(
         _check_habit_gaps, interval=HABIT_GAP_POLL_SECONDS, first=HABIT_GAP_POLL_SECONDS
+    )
+    application.job_queue.run_repeating(
+        _check_people, interval=PEOPLE_CHECK_POLL_SECONDS, first=PEOPLE_CHECK_POLL_SECONDS
     )
     application.job_queue.run_repeating(
         _record_price_snapshots, interval=PRICE_SNAPSHOT_POLL_SECONDS, first=10

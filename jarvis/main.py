@@ -213,19 +213,40 @@ def text_mode() -> None:
 # ---------------------------------------------------------------------------
 
 
+async def _run_periodic_backups() -> None:
+    """Snapshot the database on a fixed interval, independent of any chat transport.
+
+    jarvis.db is the only copy of every task/expense/habit/note the user has —
+    this runs regardless of which (or how many) chat transports are configured,
+    so it isn't tied to Telegram's job queue or Discord's client loop.
+    """
+    import asyncio
+
+    from config import BACKUP_INTERVAL_HOURS
+    from store.db import backup_db
+
+    interval_seconds = BACKUP_INTERVAL_HOURS * 3600
+    while True:
+        try:
+            await asyncio.to_thread(backup_db)
+        except Exception:  # noqa: BLE001
+            logger.exception("Scheduled database backup failed.")
+        await asyncio.sleep(interval_seconds)
+
+
 async def _run_bot_transports() -> None:
     """Build and concurrently run every configured transport until interrupted."""
     import asyncio
 
     from config import DISCORD_BOT_TOKEN, TELEGRAM_BOT_TOKEN
 
-    tasks_to_run = []
+    chat_tasks = []
 
     if TELEGRAM_BOT_TOKEN:
         from bot.telegram_bot import build_application, run as run_telegram
 
         application = build_application()
-        tasks_to_run.append(run_telegram(application))
+        chat_tasks.append(run_telegram(application))
     else:
         logger.info("TELEGRAM_BOT_TOKEN not set — Telegram transport disabled.")
 
@@ -233,16 +254,16 @@ async def _run_bot_transports() -> None:
         from bot.discord_bot import build_client, run as run_discord
 
         client = build_client()
-        tasks_to_run.append(run_discord(client))
+        chat_tasks.append(run_discord(client))
     else:
         logger.info("DISCORD_TOKEN not set — Discord transport disabled.")
 
-    if not tasks_to_run:
+    if not chat_tasks:
         raise RuntimeError(
             "No bot transport is configured. Set TELEGRAM_BOT_TOKEN and/or DISCORD_TOKEN in .env."
         )
 
-    await asyncio.gather(*tasks_to_run)
+    await asyncio.gather(_run_periodic_backups(), *chat_tasks)
 
 
 def bot_mode() -> None:

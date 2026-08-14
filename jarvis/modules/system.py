@@ -9,6 +9,7 @@ boundary).
 
 import datetime
 import logging
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -202,3 +203,25 @@ def cleanup_downloads(chat_id: str = "", args: list[str] | None = None) -> str:
     if skipped:
         lines.append(f"  (skipped {skipped} in-progress/unmovable)")
     return "\n".join(lines)
+
+
+def run_backup(chat_id: str = "", args: list[str] | None = None) -> str:
+    """Take an on-demand database backup (the same snapshot the nightly job runs).
+
+    Args:
+        chat_id: Unused — kept for a consistent command-handler signature.
+        args: Unused.
+
+    Returns:
+        Confirmation message with the backup file's path and size.
+    """
+    from store.db import backup_db
+
+    try:
+        dest_path = backup_db()
+    except sqlite3.Error as exc:
+        logger.error("Manual backup failed: %s", exc)
+        return f"Backup failed: {exc}"
+
+    size_kb = dest_path.stat().st_size / 1024
+    return f"Backed up to {dest_path.name} ({size_kb:.0f} KB)."

@@ -13,11 +13,13 @@ Usage
       conn.execute(...)
 """
 
+import datetime
 import logging
 import sqlite3
 from contextlib import contextmanager
+from pathlib import Path
 
-from config import DATA_DIR, DB_FILE
+from config import BACKUP_RETENTION_COUNT, DATA_DIR, DB_FILE
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +104,23 @@ CREATE TABLE IF NOT EXISTS notes (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS people (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    birthday TEXT,              -- 'MM-DD', optional
+    last_contacted_at TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS person_facts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    person_id INTEGER NOT NULL,
+    fact TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (person_id) REFERENCES people (id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_tasks_chat_status ON tasks (chat_id, status);
 CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders (delivered, fire_at);
 CREATE INDEX IF NOT EXISTS idx_mood_log_chat ON mood_log (chat_id, created_at);
@@ -111,6 +130,8 @@ CREATE INDEX IF NOT EXISTS idx_expenses_chat_created ON expenses (chat_id, creat
 CREATE INDEX IF NOT EXISTS idx_daily_reminders_chat_enabled ON daily_reminders (chat_id, enabled);
 CREATE INDEX IF NOT EXISTS idx_activity_log_chat_captured ON activity_log (chat_id, captured_at);
 CREATE INDEX IF NOT EXISTS idx_notes_chat_created ON notes (chat_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_people_chat_name ON people (chat_id, name);
+CREATE INDEX IF NOT EXISTS idx_person_facts_person ON person_facts (person_id, created_at);
 """
 
 # Allowed task status transitions — no arbitrary status writes (AGENTS.md §14).
@@ -157,3 +178,42 @@ def get_connection():
         conn.commit()
     finally:
         conn.close()
+
+
+def backup_db() -> Path:
+    """Snapshot the live database to data/backups/ and prune old snapshots.
+
+    Uses sqlite3's own backup API (not a file copy) so a snapshot is safe to
+    take while the bot is mid-write — it can't produce a half-written file
+    the way `cp` or `shutil.copy` could. Keeps the most recent
+    BACKUP_RETENTION_COUNT snapshots, deleting older ones (same rotation
+    idea as config.LOG_BACKUP_COUNT for logs).
+
+    Returns:
+        Path to the newly created backup file.
+    """
+    backup_dir = DATA_DIR / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest_path = backup_dir / f"jarvis-{timestamp}.db"
+
+    source = sqlite3.connect(DB_FILE)
+    try:
+        dest = sqlite3.connect(dest_path)
+        try:
+            source.backup(dest)
+        finally:
+            dest.close()
+    finally:
+        source.close()
+
+    logger.info("Database backed up to %s", dest_path)
+
+    snapshots = sorted(backup_dir.glob("jarvis-*.db"))
+    stale = snapshots[:-BACKUP_RETENTION_COUNT] if BACKUP_RETENTION_COUNT > 0 else []
+    for old_backup in stale:
+        old_backup.unlink()
+        logger.info("Pruned old backup %s", old_backup)
+
+    return dest_path

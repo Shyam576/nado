@@ -37,6 +37,12 @@ MEMORY_FILE: Path = BASE_DIR / "jarvis_memory.json"
 DATA_DIR: Path = BASE_DIR / "data"
 DB_FILE: Path = DATA_DIR / "jarvis.db"
 
+# Nightly SQLite backups — jarvis.db is the only copy of every task, expense,
+# habit log, and note; it lives on this one laptop with no other redundancy.
+BACKUP_DIR: Path = DATA_DIR / "backups"
+BACKUP_INTERVAL_HOURS: int = 24
+BACKUP_RETENTION_COUNT: int = 14  # keep ~2 weeks of nightly snapshots
+
 # Rotating log file — bot mode runs headless under a LaunchAgent that
 # blindly redirects stdout/stderr into one unbounded file with no rotation
 # of its own, so main.py rotates this file itself instead.
