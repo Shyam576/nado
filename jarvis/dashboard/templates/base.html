@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Jarvis{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <nav>
+    <span class="brand">Jarvis</span>
+    <a href="/" class="{{ 'active' if active_page == 'today' else '' }}">Today</a>
+    <a href="/week" class="{{ 'active' if active_page == 'week' else '' }}">Week</a>
+    <a href="/progress" class="{{ 'active' if active_page == 'progress' else '' }}">Progress</a>
+    <a href="/mentorship" class="{{ 'active' if active_page == 'mentorship' else '' }}">Mentorship</a>
+    <form method="post" action="/logout"><button type="submit" class="ghost">Sign out</button></form>
+  </nav>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

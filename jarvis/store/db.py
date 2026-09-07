@@ -121,6 +121,90 @@ CREATE TABLE IF NOT EXISTS person_facts (
     FOREIGN KEY (person_id) REFERENCES people (id)
 );
 
+-- Execution-discipline tracking (mentorship dashboard) --------------------
+
+CREATE TABLE IF NOT EXISTS development_cycles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    start_date TEXT NOT NULL,
+    end_date TEXT NOT NULL,
+    development_action TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS weekly_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    cycle_id INTEGER,
+    week_start TEXT NOT NULL,
+    week_end TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (cycle_id) REFERENCES development_cycles (id),
+    UNIQUE (chat_id, week_start)
+);
+
+CREATE TABLE IF NOT EXISTS weekly_outcomes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    weekly_plan_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    completed_at TEXT,
+    carried_forward INTEGER NOT NULL DEFAULT 0,
+    outcome_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (weekly_plan_id) REFERENCES weekly_plans (id)
+);
+
+CREATE TABLE IF NOT EXISTS daily_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    date TEXT NOT NULL,
+    target_start_time TEXT,
+    actual_start_time TEXT,
+    punctual INTEGER,
+    must_not_slip TEXT,
+    worked_by_priority INTEGER,
+    execution_score INTEGER,
+    adjustment_for_tomorrow TEXT,
+    review_completed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    UNIQUE (chat_id, date)
+);
+
+CREATE TABLE IF NOT EXISTS daily_priorities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    daily_plan_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    priority_order INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    completed_at TEXT,
+    carried_forward INTEGER NOT NULL DEFAULT 0,
+    carry_forward_reason TEXT,
+    weekly_outcome_id INTEGER,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (daily_plan_id) REFERENCES daily_plans (id),
+    FOREIGN KEY (weekly_outcome_id) REFERENCES weekly_outcomes (id)
+);
+
+CREATE TABLE IF NOT EXISTS weekly_reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    week_start TEXT NOT NULL,
+    went_well TEXT,
+    failed_follow_through TEXT,
+    reason TEXT,
+    pattern_observed TEXT,
+    next_week_adjustment TEXT,
+    punctuality_pct REAL,
+    completion_pct REAL,
+    carry_forward_count INTEGER,
+    review_consistency_pct REAL,
+    created_at TEXT NOT NULL,
+    UNIQUE (chat_id, week_start)
+);
+
 CREATE INDEX IF NOT EXISTS idx_tasks_chat_status ON tasks (chat_id, status);
 CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders (delivered, fire_at);
 CREATE INDEX IF NOT EXISTS idx_mood_log_chat ON mood_log (chat_id, created_at);
@@ -132,6 +216,11 @@ CREATE INDEX IF NOT EXISTS idx_activity_log_chat_captured ON activity_log (chat_
 CREATE INDEX IF NOT EXISTS idx_notes_chat_created ON notes (chat_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_people_chat_name ON people (chat_id, name);
 CREATE INDEX IF NOT EXISTS idx_person_facts_person ON person_facts (person_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_weekly_plans_chat_week ON weekly_plans (chat_id, week_start);
+CREATE INDEX IF NOT EXISTS idx_weekly_outcomes_plan ON weekly_outcomes (weekly_plan_id, outcome_order);
+CREATE INDEX IF NOT EXISTS idx_daily_plans_chat_date ON daily_plans (chat_id, date);
+CREATE INDEX IF NOT EXISTS idx_daily_priorities_plan ON daily_priorities (daily_plan_id, priority_order);
+CREATE INDEX IF NOT EXISTS idx_weekly_reviews_chat_week ON weekly_reviews (chat_id, week_start);
 """
 
 # Allowed task status transitions — no arbitrary status writes (AGENTS.md §14).

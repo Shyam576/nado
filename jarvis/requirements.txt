@@ -49,3 +49,11 @@ discord.py>=2.3.0      # Discord bot transport (runs alongside Telegram in bot m
 pytesseract>=0.3.10     # OCR for payment-screenshot expense tracking (requires `brew install tesseract`)
 python-dotenv>=1.0.0   # loads TELEGRAM_BOT_TOKEN / JARVIS_ALLOWED_CHAT_IDS from .env
 psutil>=7.0.0           # /system laptop stats: CPU, RAM, disk, battery, uptime
+
+# Web dashboard (execution-tracking UI, runs alongside the bot transports —
+# see main.py's _run_bot_transports). Server-rendered (Jinja2 templates, no
+# Node/build step) rather than a JS framework — everything stays Python.
+fastapi>=0.115.0
+uvicorn>=0.30.0
+python-multipart>=0.0.9  # parses HTML <form> submissions (login, daily plan forms)
+itsdangerous>=2.2.0      # signs the dashboard session cookie (Starlette's SessionMiddleware)

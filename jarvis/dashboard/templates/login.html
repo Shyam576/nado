@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jarvis — Execution Dashboard</title>
+  <style>
+    :root {
+      --bg: #f7f7f8; --card: #ffffff; --text: #1a1a1a; --muted: #6b7280;
+      --border: #e5e7eb; --accent: #2563eb; --error: #dc2626;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1115; --card: #171a21; --text: #e8e9ec; --muted: #9199a8;
+        --border: #262b36; --accent: #5b8def; --error: #f87171;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .card {
+      width: 100%; max-width: 320px; padding: 2rem; background: var(--card);
+      border: 1px solid var(--border); border-radius: 12px;
+    }
+    h1 { font-size: 1.1rem; font-weight: 600; margin: 0 0 .25rem; }
+    p.sub { color: var(--muted); font-size: .85rem; margin: 0 0 1.5rem; }
+    input {
+      width: 100%; padding: .6rem .75rem; border-radius: 8px; border: 1px solid var(--border);
+      background: transparent; color: var(--text); font-size: .95rem; margin-bottom: .75rem;
+    }
+    button {
+      width: 100%; padding: .6rem; border-radius: 8px; border: none; background: var(--accent);
+      color: white; font-size: .95rem; font-weight: 500; cursor: pointer;
+    }
+    button:hover { opacity: .9; }
+    .error { color: var(--error); font-size: .85rem; margin-bottom: .75rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Jarvis</h1>
+    <p class="sub">Execution dashboard</p>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <form method="post" action="/login">
+      <input type="password" name="password" placeholder="Password" autofocus required>
+      <button type="submit">Sign in</button>
+    </form>
+  </div>
+</body>
+</html>

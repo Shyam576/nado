@@ -349,6 +349,30 @@ EMAIL_FOLDER: str = os.environ.get("EMAIL_FOLDER", "INBOX")
 
 
 # ---------------------------------------------------------------------------
+# Web dashboard — a third interface (alongside Telegram/Discord) onto the
+# same execution-tracking data in data/jarvis.db. Runs in the same process
+# as the bot transports, wired in main.py's _run_bot_transports().
+# ---------------------------------------------------------------------------
+
+DASHBOARD_ENABLED: bool = os.environ.get("DASHBOARD_ENABLED", "true").lower() not in ("0", "false", "")
+
+# Bound to localhost by default — this is a single-user personal dashboard
+# with no per-user accounts, not a service meant to be reachable from
+# anywhere but this machine (or an SSH tunnel to it).
+DASHBOARD_HOST: str = os.environ.get("DASHBOARD_HOST", "127.0.0.1")
+DASHBOARD_PORT: int = int(os.environ.get("DASHBOARD_PORT", "8787"))
+
+# Single shared password — the same "one secret gates access" model as the
+# Telegram/Discord allowlists, just for a browser session instead of a
+# chat_id. Never hardcode; always read from the environment.
+DASHBOARD_PASSWORD: str = os.environ.get("DASHBOARD_PASSWORD", "")
+
+# Signs the session cookie (Starlette's SessionMiddleware). Generate one with:
+#   python -c "import secrets; print(secrets.token_hex(32))"
+DASHBOARD_SESSION_SECRET: str = os.environ.get("DASHBOARD_SESSION_SECRET", "")
+
+
+# ---------------------------------------------------------------------------
 # Validation helper
 # ---------------------------------------------------------------------------
 
@@ -398,5 +422,14 @@ def validate_bot_config() -> list[str]:
         warnings.append(
             "DISCORD_ALLOWED_USER_IDS is empty — the Discord transport will ignore every message. "
             "Set it to your own Discord user ID (right-click your name → Copy User ID)."
+        )
+    if DASHBOARD_ENABLED and not DASHBOARD_PASSWORD:
+        warnings.append(
+            "DASHBOARD_PASSWORD is not set — the web dashboard will refuse every login until it's set."
+        )
+    if DASHBOARD_ENABLED and not DASHBOARD_SESSION_SECRET:
+        warnings.append(
+            "DASHBOARD_SESSION_SECRET is not set. Generate one with: "
+            "python -c \"import secrets; print(secrets.token_hex(32))\""
         )
     return warnings
