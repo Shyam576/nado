@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Jarvis — Mentorship{% endblock %}
+{% block content %}
+    <h1>Mentorship prep</h1>
+    <p class="date-sub">&nbsp;</p>
+    <div class="error-banner" id="error-banner" style="display:none"></div>
+
+    <div class="card">
+      <h2>Development action</h2>
+      <p id="development-action" class="muted" style="margin:0;font-size:.9rem;line-height:1.5"></p>
+    </div>
+
+    <div class="card">
+      <h2>5Ws + 2Hs</h2>
+      <form id="context-form">
+        <div class="field">
+          <label for="ctx-what">What</label>
+          <textarea id="ctx-what" placeholder="What are you improving, specifically?"></textarea>
+        </div>
+        <div class="field">
+          <label for="ctx-why">Why</label>
+          <textarea id="ctx-why" placeholder="What prompted this development area?"></textarea>
+        </div>
+        <div class="field">
+          <label for="ctx-when">When</label>
+          <textarea id="ctx-when" placeholder="Timeframe for this cycle"></textarea>
+        </div>
+        <div class="field">
+          <label for="ctx-who">Who</label>
+          <textarea id="ctx-who" placeholder="Who's involved — mentor, manager, team"></textarea>
+        </div>
+        <div class="field">
+          <label for="ctx-where">Where</label>
+          <textarea id="ctx-where" placeholder="Where this shows up day to day"></textarea>
+        </div>
+        <div class="field">
+          <label for="ctx-how">How</label>
+          <textarea id="ctx-how" placeholder="The mechanism — planning, tracking, review rhythm"></textarea>
+        </div>
+        <div class="field">
+          <label for="ctx-how-much">How much</label>
+          <textarea id="ctx-how-much" placeholder="Time investment expected"></textarea>
+        </div>
+        <button type="submit" class="primary">Save</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Mentor summary</h2>
+      <div id="summary-text" class="muted" style="font-size:.9rem;line-height:1.6;white-space:pre-wrap;margin-bottom:1rem"></div>
+      <button id="generate-summary-btn">Generate summary</button>
+    </div>
+{% endblock %}
+{% block scripts %}<script src="/static/mentorship.js"></script>{% endblock %}

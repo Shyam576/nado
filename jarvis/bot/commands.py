@@ -16,6 +16,7 @@ from modules import (
     devops,
     digest,
     email_watcher,
+    execution,
     expenses,
     finance,
     habits,
@@ -184,6 +185,9 @@ HELP_TEXT: dict[str, str] = {
     "/categories": "/categories — list all expense categories",
     "/check-email": "/check-email — manually poll for new emails (also runs automatically every 2 minutes)",
     "/recall": "/recall <keyword> — search past tasks/expenses/mood/habits for a keyword",
+    "/plan": "/plan — show today's execution plan (or just tell me your priorities in plain language)",
+    "/review": "/review — show today's status and start the evening review (or just tell me how it went)",
+    "/weekstatus": "/weekstatus — this week's execution scorecard (punctuality, completion, carry-forward)",
     "/person": (
         "/person <name> <fact> | list | show <name> | birthday <name> <MM-DD> | "
         "contacted <name> — remember facts about people, track birthdays and last contact"
@@ -225,6 +229,9 @@ COMMANDS: dict[str, Callable[[str, list[str]], str]] = {
     "/categories": lambda chat_id, args: expenses.list_categories(chat_id, args),
     "/check-email": _handle_check_email,
     "/recall": lambda chat_id, args: recall.recall(chat_id, args),
+    "/plan": lambda chat_id, args: execution.describe_today(chat_id),
+    "/review": lambda chat_id, args: execution.review_prompt(chat_id),
+    "/weekstatus": lambda chat_id, args: execution.describe_week(chat_id),
     "/person": _handle_person,
     "/help": lambda chat_id, args: (
         "Available commands:\n"
