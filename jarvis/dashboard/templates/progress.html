@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Jarvis — Progress{% endblock %}
+{% block content %}
+    <h1>Progress</h1>
+    <p class="date-sub" id="date-sub">&nbsp;</p>
+    <div class="error-banner" id="error-banner" style="display:none"></div>
+
+    <div id="no-cycle" class="card" style="display:none">
+      <h2>Start your development cycle</h2>
+      <form id="start-cycle-form">
+        <div class="field">
+          <label for="cycle-title">Title</label>
+          <input type="text" id="cycle-title" placeholder="e.g. Execution discipline — Q3 mentorship" required>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="cycle-start">Start date</label>
+            <input type="text" id="cycle-start" placeholder="YYYY-MM-DD" pattern="\d{4}-\d{2}-\d{2}" required>
+          </div>
+          <div class="field">
+            <label for="cycle-end">End date</label>
+            <input type="text" id="cycle-end" placeholder="YYYY-MM-DD" pattern="\d{4}-\d{2}-\d{2}" required>
+          </div>
+        </div>
+        <div class="field">
+          <label for="cycle-action">Development action</label>
+          <textarea id="cycle-action" placeholder="What are you working on this cycle?"></textarea>
+        </div>
+        <button type="submit" class="primary">Start cycle</button>
+      </form>
+    </div>
+
+    <div id="cycle-content" style="display:none">
+      <div class="cycle-header">
+        <span class="cycle-title" id="cycle-title-display"></span>
+        <span class="cycle-meta" id="cycle-meta-display"></span>
+      </div>
+
+      <div class="card viz-root">
+        <h2>Punctuality, completion &amp; review consistency</h2>
+        <div class="chart-container" id="chart-percentages"></div>
+        <div class="chart-legend" id="legend-percentages"></div>
+      </div>
+
+      <div class="card viz-root">
+        <h2>Carried-forward commitments</h2>
+        <div class="chart-container" id="chart-carry-forward"></div>
+      </div>
+
+      <div class="card viz-root">
+        <h2>Average execution score</h2>
+        <div class="chart-container" id="chart-execution-score"></div>
+      </div>
+
+      <div class="card">
+        <h2>Week-over-week</h2>
+        <div style="overflow-x:auto">
+          <table class="progress-table" id="progress-table">
+            <thead>
+              <tr>
+                <th>Week</th><th>Punctuality</th><th>Completion</th><th>Carry fwd</th>
+                <th>Reviews</th><th>Avg score</th>
+              </tr>
+            </thead>
+            <tbody id="progress-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+{% endblock %}
+{% block scripts %}
+  <script src="/static/charts.js"></script>
+  <script src="/static/progress.js"></script>
+{% endblock %}
