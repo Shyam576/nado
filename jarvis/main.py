@@ -269,6 +269,7 @@ async def _run_bot_transports() -> None:
 def bot_mode() -> None:
     """Run Jarvis as a chat bot across every configured transport. Press Ctrl-C to exit."""
     import asyncio
+    import os
 
     import watchdog
     from config import validate_bot_config
@@ -282,6 +283,21 @@ def bot_mode() -> None:
         asyncio.run(_run_bot_transports())
     except KeyboardInterrupt:
         logger.info("Shutdown requested.")
+    except Exception:
+        # An uncaught exception here (e.g. a transient DNS failure during
+        # Discord/Telegram login) can leave lingering non-daemon threads
+        # (the local LLM's worker threads) that keep the process alive even
+        # after the main thread has unwound — so the process never actually
+        # exits, and the LaunchAgent's KeepAlive never sees a death to
+        # restart from. Force-exit instead, the same recovery watchdog.py
+        # already relies on for a wedged event loop: KeepAlive=true in
+        # com.jarvis.bot.plist relaunches on ANY process exit, crash or
+        # clean, after its 30s ThrottleInterval.
+        logger.critical(
+            "Bot transports crashed — force-exiting so the LaunchAgent restarts the process.",
+            exc_info=True,
+        )
+        os._exit(1)
 
 
 # ---------------------------------------------------------------------------
