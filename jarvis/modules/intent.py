@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 import command_confirmation
-from modules import calendar_app, devops, digest, expenses, finance, notes, projects, recall, system, tasks
+from modules import calendar_app, devops, digest, execution, expenses, finance, notes, projects, recall, system, tasks
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +137,11 @@ Intents and their required fields:
   {"intent": "lock_screen"}
   {"intent": "project_status", "name": "<project folder name>"}
   {"intent": "cleanup_downloads"}
+  {"intent": "plan_day"}
+  {"intent": "set_daily_priorities", "priorities": ["<priority 1>", "<priority 2>", "..."]}
+  {"intent": "review_day"}
+  {"intent": "submit_daily_review", "punctual": <true, false, or null>, "worked_by_priority": <true, false, or null>, "execution_score": <1-10, or null>, "adjustment_for_tomorrow": "<text, or null>", "actual_start_time": "<HH:MM 24h, or null>"}
+  {"intent": "weekly_status"}
   {"intent": "chat"}
 
 Rules:
@@ -163,6 +168,16 @@ Rules:
   category gets re-classified automatically from the description, same as when an expense is first
   logged. Only set expense_id when the user names one explicitly; otherwise use null to mean "the
   most recently logged expense".
+- plan_day is for "plan my day" / "what's my plan today" with NO priorities stated yet — it shows
+  the current plan and prompts for priorities. set_daily_priorities is for a message that actually
+  STATES the priorities (a numbered or listed set of things to do today) — extract each item as its
+  own string, stripping the numbering. Never invent priorities that aren't in the message.
+- review_day is for "review my day" / "let's do my review" with no review content yet — it shows
+  today's status and prompts for the review. submit_daily_review is for a message that actually
+  answers the review (punctuality, whether they followed priorities, a score, an adjustment) — only
+  set fields the message actually mentions; leave everything else null, never guess a score or time
+  that wasn't stated. execution_score must be an integer 1-10.
+- weekly_status is for "how did I do this week" / "how's my week going" / "show my weekly progress".
 
 Examples:
 "spent 250 on coffee" -> {"intent": "add_expense", "amount": 250, "description": "coffee"}
@@ -206,7 +221,17 @@ Examples:
 "status of the jarvis project" -> {"intent": "project_status", "name": "jarvis"}
 "clean up my downloads" -> {"intent": "cleanup_downloads"}
 "how are you doing" -> {"intent": "chat"}
-"what do you think about the weather" -> {"intent": "chat"}"""
+"what do you think about the weather" -> {"intent": "chat"}
+"plan my day" -> {"intent": "plan_day"}
+"what's on my plate for today, let's plan it out" -> {"intent": "plan_day"}
+"my top priorities today are: 1. fix deployment 2. review PR 3. send client response" -> {"intent": "set_daily_priorities", "priorities": ["fix deployment", "review PR", "send client response"]}
+"today I need to ship the release and call the vendor" -> {"intent": "set_daily_priorities", "priorities": ["ship the release", "call the vendor"]}
+"review my day" -> {"intent": "review_day"}
+"let's do my evening review" -> {"intent": "review_day"}
+"I was punctual, worked by priority, execution score 7, adjustment: start 15 minutes earlier" -> {"intent": "submit_daily_review", "punctual": true, "worked_by_priority": true, "execution_score": 7, "adjustment_for_tomorrow": "start 15 minutes earlier", "actual_start_time": null}
+"I was late today, got in at 9:20, mostly just reacted to whatever came in" -> {"intent": "submit_daily_review", "punctual": false, "worked_by_priority": false, "execution_score": null, "adjustment_for_tomorrow": null, "actual_start_time": "09:20"}
+"how did I do this week" -> {"intent": "weekly_status"}
+"how's my week going" -> {"intent": "weekly_status"}"""
 
 
 def _classify(text: str) -> Optional[dict]:
@@ -387,6 +412,48 @@ def _dispatch_get_weather(chat_id: str, data: dict) -> Optional[IntentReply]:
     return IntentReply(actions.get_weather(location))
 
 
+def _dispatch_set_daily_priorities(chat_id: str, data: dict) -> Optional[IntentReply]:
+    priorities = data.get("priorities")
+    if not isinstance(priorities, list) or not priorities:
+        return None
+    titles = [str(p).strip() for p in priorities if str(p).strip()]
+    if not titles:
+        return None
+    execution.add_priorities(chat_id, titles)
+    return IntentReply("Added " + str(len(titles)) + " priorit" + ("y" if len(titles) == 1 else "ies")
+                        + " for today:\n\n" + execution.describe_today(chat_id))
+
+
+def _dispatch_submit_daily_review(chat_id: str, data: dict) -> Optional[IntentReply]:
+    punctual = data.get("punctual")
+    worked_by_priority = data.get("worked_by_priority")
+    execution_score = data.get("execution_score")
+    adjustment = data.get("adjustment_for_tomorrow")
+    actual_start_time = data.get("actual_start_time")
+
+    if not isinstance(punctual, bool):
+        punctual = None
+    if not isinstance(worked_by_priority, bool):
+        worked_by_priority = None
+    if not isinstance(execution_score, int) or not (1 <= execution_score <= 10):
+        execution_score = None
+    adjustment = str(adjustment).strip() if adjustment else None
+    actual_start_time = str(actual_start_time).strip() if actual_start_time else None
+
+    if all(v is None for v in (punctual, worked_by_priority, execution_score, adjustment, actual_start_time)):
+        return None  # nothing usable extracted — fall through rather than submit an empty review
+
+    execution.submit_evening_review(
+        chat_id,
+        actual_start_time=actual_start_time,
+        punctual=punctual,
+        worked_by_priority=worked_by_priority,
+        execution_score=execution_score,
+        adjustment_for_tomorrow=adjustment,
+    )
+    return IntentReply("Got it — logged today's review.\n\n" + execution.describe_today(chat_id))
+
+
 def _text_handler(func: Callable[[str], str]) -> Callable[[str, dict], Optional[IntentReply]]:
     """Wrap a plain text-returning module call into an IntentReply handler."""
     return lambda chat_id, data: IntentReply(func(chat_id))
@@ -426,6 +493,11 @@ _DISPATCH: dict[str, Callable[[str, dict], Optional[IntentReply]]] = {
     "write_clipboard": _dispatch_write_clipboard,
     "play_media": _dispatch_play_media,
     "get_weather": _dispatch_get_weather,
+    "plan_day": _text_handler(execution.describe_today),
+    "set_daily_priorities": _dispatch_set_daily_priorities,
+    "review_day": _text_handler(execution.review_prompt),
+    "submit_daily_review": _dispatch_submit_daily_review,
+    "weekly_status": _text_handler(execution.describe_week),
 }
 
 

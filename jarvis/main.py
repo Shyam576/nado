@@ -234,11 +234,30 @@ async def _run_periodic_backups() -> None:
         await asyncio.sleep(interval_seconds)
 
 
+async def _run_dashboard() -> None:
+    """Serve the web dashboard — a third interface onto the same data as Telegram/Discord.
+
+    Runs as an ASGI app via uvicorn in this same asyncio loop, not a
+    separate process/LaunchAgent, matching how the nightly backup task is
+    integrated: one process, one place to restart.
+    """
+    import uvicorn
+
+    from api.app import create_app
+    from config import DASHBOARD_HOST, DASHBOARD_PORT
+
+    server = uvicorn.Server(
+        uvicorn.Config(create_app(), host=DASHBOARD_HOST, port=DASHBOARD_PORT, log_level="warning")
+    )
+    logger.info("Dashboard starting on http://%s:%d", DASHBOARD_HOST, DASHBOARD_PORT)
+    await server.serve()
+
+
 async def _run_bot_transports() -> None:
     """Build and concurrently run every configured transport until interrupted."""
     import asyncio
 
-    from config import DISCORD_BOT_TOKEN, TELEGRAM_BOT_TOKEN
+    from config import DASHBOARD_ENABLED, DISCORD_BOT_TOKEN, TELEGRAM_BOT_TOKEN
 
     chat_tasks = []
 
@@ -263,7 +282,13 @@ async def _run_bot_transports() -> None:
             "No bot transport is configured. Set TELEGRAM_BOT_TOKEN and/or DISCORD_TOKEN in .env."
         )
 
-    await asyncio.gather(_run_periodic_backups(), *chat_tasks)
+    background_tasks = [_run_periodic_backups()]
+    if DASHBOARD_ENABLED:
+        background_tasks.append(_run_dashboard())
+    else:
+        logger.info("DASHBOARD_ENABLED is false — web dashboard disabled.")
+
+    await asyncio.gather(*background_tasks, *chat_tasks)
 
 
 def bot_mode() -> None:

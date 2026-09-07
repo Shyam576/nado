@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Jarvis — Week{% endblock %}
+{% block content %}
+    <h1>This week</h1>
+    <p class="date-sub" id="date-sub">&nbsp;</p>
+    <div class="error-banner" id="error-banner" style="display:none"></div>
+
+    <div class="card">
+      <h2>Weekly outcomes</h2>
+      <ul class="outcome-list" id="outcome-list"></ul>
+      <form id="add-outcome-form" class="row">
+        <input type="text" id="new-outcome-title" placeholder="Add a weekly outcome (aim for 3-5)...">
+        <button type="submit">Add</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Scorecard</h2>
+      <dl class="stat-list" id="scorecard"></dl>
+    </div>
+
+    <div class="card">
+      <h2>Weekly review</h2>
+
+      <form id="review-form">
+        <div class="field">
+          <label for="went-well">What went well this week?</label>
+          <textarea id="went-well"></textarea>
+        </div>
+        <div class="field">
+          <label for="failed-follow-through">What did I fail to follow through on?</label>
+          <textarea id="failed-follow-through"></textarea>
+        </div>
+        <div class="field">
+          <label for="reason">Why?</label>
+          <textarea id="reason"></textarea>
+        </div>
+        <div class="field">
+          <label for="pattern-observed">What pattern am I noticing?</label>
+          <textarea id="pattern-observed"></textarea>
+        </div>
+        <div class="field">
+          <label for="next-week-adjustment">What ONE thing will I change next week?</label>
+          <textarea id="next-week-adjustment"></textarea>
+        </div>
+        <button type="submit" class="primary">Submit weekly review</button>
+      </form>
+
+      <div id="review-result" style="display:none">
+        <dl class="review-summary" id="review-summary"></dl>
+        <button id="edit-review-btn" style="margin-top:1rem">Edit review</button>
+      </div>
+    </div>
+{% endblock %}
+{% block scripts %}<script src="/static/week.js"></script>{% endblock %}

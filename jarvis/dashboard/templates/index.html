@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Jarvis — Today{% endblock %}
+{% block content %}
+    <h1>Today</h1>
+    <p class="date-sub" id="date-sub">&nbsp;</p>
+    <div class="error-banner" id="error-banner" style="display:none"></div>
+
+    <div class="card">
+      <h2>Morning plan</h2>
+      <form id="morning-plan-form">
+        <div class="row">
+          <div class="field">
+            <label for="target-start-time">Target start time</label>
+            <input type="time" id="target-start-time">
+          </div>
+        </div>
+        <div class="field">
+          <label for="must-not-slip">One commitment that must not slip today</label>
+          <input type="text" id="must-not-slip" placeholder="e.g. Send the client response by 5pm">
+        </div>
+        <button type="submit" class="primary">Save</button>
+      </form>
+
+      <h2 style="margin-top:1.5rem">Priorities</h2>
+      <ul class="priority-list" id="priority-list"></ul>
+      <form id="add-priority-form" class="row">
+        <input type="text" id="new-priority-title" placeholder="Add a priority...">
+        <button type="submit">Add</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Evening review</h2>
+
+      <form id="review-form">
+        <div class="field">
+          <label for="actual-start-time">Actual start/arrival time</label>
+          <input type="time" id="actual-start-time">
+        </div>
+        <div class="field">
+          <label>Was I punctual?</label>
+          <div class="pill-group">
+            <div class="pill" data-pill-group="punctual" data-pill-value="yes">Yes</div>
+            <div class="pill" data-pill-group="punctual" data-pill-value="no">No</div>
+          </div>
+        </div>
+        <div class="field">
+          <label>Did I work according to priorities, or mostly react to incoming work?</label>
+          <div class="pill-group">
+            <div class="pill" data-pill-group="worked-by-priority" data-pill-value="yes">Followed the plan</div>
+            <div class="pill" data-pill-group="worked-by-priority" data-pill-value="no">Mostly reactive</div>
+          </div>
+        </div>
+        <div class="field">
+          <label for="execution-score">Daily execution score</label>
+          <div class="score-row">
+            <input type="range" id="execution-score" min="1" max="10" value="5">
+            <span class="score-value" id="execution-score-value">5</span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="adjustment-tomorrow">One adjustment for tomorrow</label>
+          <textarea id="adjustment-tomorrow" placeholder="e.g. Start 15 minutes earlier"></textarea>
+        </div>
+        <button type="submit" class="primary">Submit review</button>
+        <p class="muted" style="font-size:.75rem;margit-top:.5rem">
+          Mark priorities done or carried forward above before submitting — this review reflects
+          how they currently stand.
+        </p>
+      </form>
+
+      <div id="review-result" style="display:none">
+        <dl class="review-summary" id="review-summary"></dl>
+        <button id="edit-review-btn" style="margin-top:1rem">Edit review</button>
+      </div>
+    </div>
+{% endblock %}
+{% block scripts %}<script src="/static/today.js"></script>{% endblock %}
