@@ -56,20 +56,22 @@ h1 { font-size: 1.3rem; font-weight: 600; margin: 0 0 .1rem; }
 .field:last-child { margin-bottom: 0; }
 label { display: block; font-size: .8rem; color: var(--muted); margin-bottom: .3rem; }
 input[type=text], input[type=time], textarea, select {
-  width: 100%; padding: .5rem .65rem; border-radius: 8px; border: 1px solid var(--border);
+  width: 100%; padding: .75rem .65rem; border-radius: 8px; border: 1px solid var(--border);
   background: transparent; color: var(--text); font-size: .9rem; font-family: inherit;
 }
 textarea { resize: vertical; min-height: 3.5rem; }
 .row { display: flex; gap: .6rem; }
 .row > * { flex: 1; }
 button, .btn {
-  padding: .5rem .9rem; border-radius: 8px; border: 1px solid var(--border); background: var(--card);
-  color: var(--text); font-size: .85rem; cursor: pointer; font-family: inherit;
+  padding: .85rem 1rem; border-radius: 8px; border: 1px solid var(--border); background: var(--card);
+  color: var(--text); font-size: .85rem; cursor: pointer; font-family: inherit; touch-action: manipulation;
 }
 button.primary { background: var(--accent); border-color: var(--accent); color: white; }
 button.primary:hover { opacity: .9; }
-button.ghost { border: none; background: none; color: var(--muted); padding: .25rem .4rem; }
+button.primary:active { opacity: .8; }
+button.ghost { border: none; background: none; color: var(--muted); padding: .5rem .6rem; }
 button.ghost:hover { color: var(--text); }
+button.ghost:active { opacity: .6; }
 button:disabled { opacity: .5; cursor: default; }
 .priority-list { list-style: none; margin: 0 0 1rem; padding: 0; }
 .priority {
@@ -87,12 +89,13 @@ button:disabled { opacity: .5; cursor: default; }
   padding: .15rem .4rem; border-radius: 4px; margin-right: .4rem; white-space: nowrap;
 }
 .priority .actions { display: flex; gap: .25rem; }
-.priority input[type=checkbox] { width: 1.05rem; height: 1.05rem; }
+.priority input[type=checkbox] { width: 1.3rem; height: 1.3rem; flex-shrink: 0; }
 .pill-group { display: flex; gap: .5rem; }
 .pill {
-  flex: 1; text-align: center; padding: .5rem; border-radius: 8px; border: 1px solid var(--border);
-  cursor: pointer; font-size: .85rem; color: var(--muted);
+  flex: 1; text-align: center; padding: .75rem .5rem; border-radius: 8px; border: 1px solid var(--border);
+  cursor: pointer; font-size: .85rem; color: var(--muted); touch-action: manipulation;
 }
+.pill:active { opacity: .7; }
 .pill.selected.yes { background: var(--accent-weak); color: var(--accent); border-color: var(--accent); }
 .pill.selected.no { background: var(--danger-weak); color: var(--error); border-color: var(--error); }
 .score-row { display: flex; align-items: center; gap: .75rem; }
@@ -216,10 +219,12 @@ button:disabled { opacity: .5; cursor: default; }
 .wizard-confirm-title { font-weight: 600; margin: 0 0 .75rem; }
 .chip-group { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .6rem; }
 .chip {
-  border: 1px solid var(--border); border-radius: 20px; padding: .35rem .8rem;
+  border: 1px solid var(--border); border-radius: 20px; padding: .55rem .9rem;
   font-size: .8rem; cursor: pointer; color: var(--text); background: var(--card);
+  touch-action: manipulation;
 }
 .chip:hover { border-color: var(--accent); }
+.chip:active { opacity: .7; }
 .chip.selected { background: var(--accent-weak); border-color: var(--accent); color: var(--accent); }
 .chip-count { color: var(--muted); font-size: .72rem; margin-left: .3rem; }
 

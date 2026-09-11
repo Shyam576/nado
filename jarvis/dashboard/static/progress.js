@@ -125,11 +125,17 @@ async function startCycle(event) {
     end_date: document.getElementById("cycle-end").value.trim(),
     development_action: document.getElementById("cycle-action").value.trim() || null,
   };
+  const btn = document.getElementById("start-cycle-btn");
+  btn.disabled = true;
+  btn.textContent = "Starting...";
   try {
     await api("/api/cycle", { method: "POST", body: JSON.stringify(body) });
     await load();
   } catch (err) {
     showError(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Start cycle";
   }
 }
 
