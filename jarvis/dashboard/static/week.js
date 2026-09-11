@@ -2,7 +2,13 @@
 // Same vanilla-JS, re-fetch-after-mutation pattern as today.js.
 
 let state = null;
-let reviewEditMode = false;
+
+// --- Weekly review wizard state ---------------------------------------------
+let wizardActive = false;
+let wizardSteps = [];
+let wizardIndex = 0;
+let wizardAnswers = {};
+let wizardSuggestions = null;
 
 async function api(path, options) {
   const res = await fetch(path, {
@@ -49,7 +55,9 @@ function render() {
   document.getElementById("date-sub").textContent = formatDateRange(state.week_start, state.week_end);
   renderOutcomes();
   renderScorecard();
-  renderReview();
+  if (!wizardActive) {
+    renderReview();
+  }
 }
 
 // --- Outcomes ----------------------------------------------------------------
@@ -152,11 +160,13 @@ function renderScorecard() {
 
 function renderReview() {
   const review = state.review;
-  const formEl = document.getElementById("review-form");
+  const startEl = document.getElementById("review-start");
+  const wizardEl = document.getElementById("review-wizard");
   const resultEl = document.getElementById("review-result");
 
-  if (review && !reviewEditMode) {
-    formEl.style.display = "none";
+  if (review) {
+    startEl.style.display = "none";
+    wizardEl.style.display = "none";
     resultEl.style.display = "block";
     document.getElementById("review-summary").innerHTML = `
       <dt>What went well</dt><dd>${review.went_well ? escapeHtml(review.went_well) : "—"}</dd>
@@ -166,30 +176,208 @@ function renderReview() {
       <dt>Change for next week</dt><dd>${review.next_week_adjustment ? escapeHtml(review.next_week_adjustment) : "—"}</dd>
     `;
   } else {
-    formEl.style.display = "block";
+    startEl.style.display = "block";
+    wizardEl.style.display = "none";
     resultEl.style.display = "none";
-    if (review) {
-      document.getElementById("went-well").value = review.went_well || "";
-      document.getElementById("failed-follow-through").value = review.failed_follow_through || "";
-      document.getElementById("reason").value = review.reason || "";
-      document.getElementById("pattern-observed").value = review.pattern_observed || "";
-      document.getElementById("next-week-adjustment").value = review.next_week_adjustment || "";
-    }
   }
 }
 
-async function submitReview(event) {
-  event.preventDefault();
-  const body = {
-    went_well: document.getElementById("went-well").value || null,
-    failed_follow_through: document.getElementById("failed-follow-through").value || null,
-    reason: document.getElementById("reason").value || null,
-    pattern_observed: document.getElementById("pattern-observed").value || null,
-    next_week_adjustment: document.getElementById("next-week-adjustment").value || null,
-  };
+// --- Weekly review wizard: one question at a time. Chips for "what did I
+// fail to follow through on" and "why" are seeded from what actually
+// carried forward this week (modules/execution.py's
+// get_weekly_review_suggestions()) instead of composed from scratch. -------
+
+function buildWizardSteps() {
+  return ["went-well", "failed-follow-through", "reason", "pattern-observed", "next-week-adjustment", "confirm"].map(
+    (type) => ({ type })
+  );
+}
+
+async function startWizard() {
+  const review = state.review;
   try {
-    await api("/api/week/review", { method: "POST", body: JSON.stringify(body) });
-    reviewEditMode = false;
+    wizardSuggestions = await api(`/api/week/review-suggestions?week_start=${state.week_start}`);
+  } catch (err) {
+    showError(err.message);
+    wizardSuggestions = { incomplete_items: { outcomes: [], priorities: [] }, carry_forward_reasons: [], common_adjustment: null };
+  }
+
+  wizardAnswers = review
+    ? {
+        went_well: review.went_well,
+        failed_follow_through: review.failed_follow_through,
+        reason: review.reason,
+        pattern_observed: review.pattern_observed,
+        next_week_adjustment: review.next_week_adjustment,
+      }
+    : {
+        went_well: null,
+        failed_follow_through: null,
+        reason: null,
+        pattern_observed: null,
+        next_week_adjustment: null,
+      };
+
+  wizardActive = true;
+  wizardIndex = 0;
+  wizardSteps = buildWizardSteps();
+
+  document.getElementById("review-start").style.display = "none";
+  document.getElementById("review-result").style.display = "none";
+  document.getElementById("review-wizard").style.display = "block";
+  renderWizardStep();
+}
+
+function renderWizardStep() {
+  const step = wizardSteps[wizardIndex];
+  const container = document.getElementById("wizard-step");
+
+  document.getElementById("wizard-progress").textContent = `Step ${wizardIndex + 1} of ${wizardSteps.length}`;
+  document.getElementById("wizard-back").disabled = wizardIndex === 0;
+  document.getElementById("wizard-next").textContent = step.type === "confirm" ? "Submit weekly review" : "Next";
+
+  const renderers = {
+    "went-well": () => renderTextStep(container, "What went well this week?", "went_well"),
+    "failed-follow-through": renderFailedFollowThroughStep,
+    reason: renderReasonStep,
+    "pattern-observed": () => renderTextStep(container, "What pattern am I noticing?", "pattern_observed"),
+    "next-week-adjustment": renderNextWeekAdjustmentStep,
+    confirm: renderConfirmStep,
+  };
+  renderers[step.type](container);
+}
+
+function wizardAdvance() {
+  wizardIndex++;
+  renderWizardStep();
+}
+
+function wizardBack() {
+  if (wizardIndex > 0) {
+    wizardIndex--;
+    renderWizardStep();
+  }
+}
+
+function renderTextStep(container, label, field) {
+  container.innerHTML = `<label for="wizard-text">${escapeHtml(label)}</label><textarea id="wizard-text"></textarea>`;
+  const textarea = document.getElementById("wizard-text");
+  textarea.value = wizardAnswers[field] || "";
+  textarea.addEventListener("input", () => {
+    wizardAnswers[field] = textarea.value || null;
+  });
+}
+
+function renderFailedFollowThroughStep(container) {
+  const items = [...wizardSuggestions.incomplete_items.outcomes, ...wizardSuggestions.incomplete_items.priorities];
+  container.innerHTML = `
+    <label>What did I fail to follow through on?</label>
+    ${items.length ? '<div class="chip-group" id="ffc-chips"></div>' : ""}
+    <textarea id="wizard-text" placeholder="${items.length ? "Tap items above to add them, or type your own" : "e.g. Architecture doc, client follow-up"}"></textarea>
+  `;
+  const textarea = document.getElementById("wizard-text");
+  textarea.value = wizardAnswers.failed_follow_through || "";
+  textarea.addEventListener("input", () => {
+    wizardAnswers.failed_follow_through = textarea.value || null;
+  });
+
+  if (items.length) {
+    const chipsEl = document.getElementById("ffc-chips");
+    items.forEach((item) => {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = item.title;
+      chip.addEventListener("click", () => {
+        const current = textarea.value.trim();
+        textarea.value = current ? `${current}, ${item.title}` : item.title;
+        wizardAnswers.failed_follow_through = textarea.value;
+        chip.classList.add("selected");
+      });
+      chipsEl.appendChild(chip);
+    });
+  }
+}
+
+function renderReasonStep(container) {
+  const reasons = wizardSuggestions.carry_forward_reasons;
+  container.innerHTML = `
+    <label>Why?</label>
+    ${reasons.length ? '<div class="chip-group" id="reason-chips"></div>' : ""}
+    <textarea id="wizard-text" placeholder="What got in the way?"></textarea>
+  `;
+  const textarea = document.getElementById("wizard-text");
+  textarea.value = wizardAnswers.reason || "";
+  textarea.addEventListener("input", () => {
+    wizardAnswers.reason = textarea.value || null;
+  });
+
+  if (reasons.length) {
+    const chipsEl = document.getElementById("reason-chips");
+    reasons.forEach((r) => {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.innerHTML = `${escapeHtml(r.reason)}${r.count ? `<span class="chip-count">×${r.count}</span>` : ""}`;
+      chip.addEventListener("click", () => {
+        const alreadySelected = chip.classList.contains("selected");
+        chipsEl.querySelectorAll(".chip").forEach((c) => c.classList.remove("selected"));
+        if (alreadySelected) {
+          textarea.value = "";
+        } else {
+          chip.classList.add("selected");
+          textarea.value = r.reason;
+        }
+        wizardAnswers.reason = textarea.value || null;
+      });
+      chipsEl.appendChild(chip);
+    });
+  }
+}
+
+function renderNextWeekAdjustmentStep(container) {
+  const common = wizardSuggestions.common_adjustment;
+  container.innerHTML = `
+    <label>What ONE thing will I change next week?</label>
+    ${common ? '<div class="chip-group" id="adjustment-chips"></div>' : ""}
+    <textarea id="wizard-text"></textarea>
+  `;
+  const textarea = document.getElementById("wizard-text");
+  textarea.value = wizardAnswers.next_week_adjustment || "";
+  textarea.addEventListener("input", () => {
+    wizardAnswers.next_week_adjustment = textarea.value || null;
+  });
+
+  if (common) {
+    const chipsEl = document.getElementById("adjustment-chips");
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.textContent = `${common} (came up all week)`;
+    chip.addEventListener("click", () => {
+      textarea.value = common;
+      wizardAnswers.next_week_adjustment = common;
+      chip.classList.add("selected");
+    });
+    chipsEl.appendChild(chip);
+  }
+}
+
+function renderConfirmStep(container) {
+  const a = wizardAnswers;
+  container.innerHTML = `
+    <p class="wizard-confirm-title">Ready to submit?</p>
+    <dl class="review-summary">
+      <dt>What went well</dt><dd>${a.went_well ? escapeHtml(a.went_well) : "—"}</dd>
+      <dt>Failed to follow through on</dt><dd>${a.failed_follow_through ? escapeHtml(a.failed_follow_through) : "—"}</dd>
+      <dt>Why</dt><dd>${a.reason ? escapeHtml(a.reason) : "—"}</dd>
+      <dt>Pattern noticed</dt><dd>${a.pattern_observed ? escapeHtml(a.pattern_observed) : "—"}</dd>
+      <dt>Change for next week</dt><dd>${a.next_week_adjustment ? escapeHtml(a.next_week_adjustment) : "—"}</dd>
+    </dl>
+  `;
+}
+
+async function wizardSubmit() {
+  try {
+    await api("/api/week/review", { method: "POST", body: JSON.stringify({ ...wizardAnswers, week_start: state.week_start }) });
+    wizardActive = false;
     await load();
   } catch (err) {
     showError(err.message);
@@ -197,13 +385,21 @@ async function submitReview(event) {
 }
 
 function editReview() {
-  reviewEditMode = true;
-  render();
+  startWizard();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("add-outcome-form").addEventListener("submit", addOutcome);
-  document.getElementById("review-form").addEventListener("submit", submitReview);
+  document.getElementById("start-review-btn").addEventListener("click", startWizard);
   document.getElementById("edit-review-btn").addEventListener("click", editReview);
+  document.getElementById("wizard-back").addEventListener("click", wizardBack);
+  document.getElementById("wizard-next").addEventListener("click", () => {
+    const step = wizardSteps[wizardIndex];
+    if (step.type === "confirm") {
+      wizardSubmit();
+    } else {
+      wizardAdvance();
+    }
+  });
   load();
 });

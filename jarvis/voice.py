@@ -23,13 +23,10 @@ import wave
 from math import gcd
 from typing import Optional
 
-import pyaudio
-
 import edge_tts
 import numpy as np
 import pyttsx3
 import speech_recognition as sr
-import whisper
 
 import ui
 from config import (
@@ -85,12 +82,26 @@ def _clean_for_speech(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Whisper STT model — loaded once at import time
+# Whisper STT model — lazy-loaded on first use by listen() (live mic capture
+# only; bot-mode voice-note transcription has its own separate lazy loader in
+# modules/transcription.py). Loading this at import time would force every
+# consumer of voice.py — including bot mode, which only ever calls
+# synthesize_to_file() for TTS replies and never listen() — to download and
+# load a Whisper model it will never use.
 # ---------------------------------------------------------------------------
 
-logger.info("Loading Whisper '%s' model…", STT_WHISPER_MODEL)
-_whisper_model = whisper.load_model(STT_WHISPER_MODEL)
-logger.info("Whisper model ready.")
+_whisper_model = None
+
+
+def _get_whisper_model():
+    global _whisper_model
+    if _whisper_model is None:
+        import whisper
+
+        logger.info("Loading Whisper '%s' model…", STT_WHISPER_MODEL)
+        _whisper_model = whisper.load_model(STT_WHISPER_MODEL)
+        logger.info("Whisper model ready.")
+    return _whisper_model
 
 # Whisper was trained on 16 kHz audio — resample to match
 _WHISPER_SAMPLE_RATE = 16000
@@ -299,6 +310,8 @@ def listen(
     Returns:
         The transcribed string in lower-case, or ``None`` on failure.
     """
+    import pyaudio  # local import — only voice_mode's live mic capture needs PortAudio installed
+
     CHUNK = 512       # smaller = more responsive bar updates
     RATE = 16_000     # record at Whisper's native rate — no resampling needed
     BAR_WIDTH = 26
@@ -384,7 +397,7 @@ def listen(
 
     ui.set_state("transcribing")
     try:
-        result = _whisper_model.transcribe(
+        result = _get_whisper_model().transcribe(
             audio_np,
             language="en",
             fp16=False,

@@ -29,14 +29,10 @@ import sys
 from logging.handlers import RotatingFileHandler
 from typing import Optional
 
-from actions import parse_and_execute
 from brain import ask
 import command_confirmation
 from config import LOG_BACKUP_COUNT, LOG_DIR, LOG_FILE, LOG_MAX_BYTES, OWNER_ID, validate_config
 import memory
-import proactive
-import ui
-from voice import listen, speak, calibrate_microphone, _stop_event
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -89,6 +85,16 @@ def process_input(user_text: str) -> None:
     Args:
         user_text: The transcribed (or typed) message from the user.
     """
+    # Local imports: actions.py pulls in pyautogui (needs a display), voice.py
+    # pulls in pyaudio/speech_recognition (need a mic + PortAudio), and ui.py
+    # pulls in rich (harmless, but still unused terminal-TUI code bot mode has
+    # no reason to load). bot_mode() never calls this function, so keeping
+    # these out of main.py's top-level imports means `python main.py bot`
+    # starts cleanly on a headless server with no display/audio hardware at all.
+    from actions import parse_and_execute
+    from voice import speak
+    import ui
+
     logger.info("Processing: '%s'", user_text)
 
     ui.set_state("thinking")
@@ -136,6 +142,10 @@ def voice_mode() -> None:
     Listens continuously and responds to every utterance — no wake word needed.
     Press Ctrl-C to exit.
     """
+    from voice import listen, speak, calibrate_microphone, _stop_event
+    import proactive
+    import ui
+
     _check_config_or_warn()
 
     _stop_event.clear()  # ensure clean state on (re-)entry
@@ -181,6 +191,7 @@ def text_mode() -> None:
     _check_config_or_warn()
 
     from brain import clear_history
+    from voice import speak
 
     speak("Jarvis online. How may I assist you?")
     print("\n[Text mode] Type your message and press Enter. ('quit' to exit)\n")

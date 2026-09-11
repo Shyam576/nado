@@ -143,3 +143,55 @@ def test_cancel_daily_reminder():
 
 def test_cancel_daily_reminder_with_none_active():
     assert "don't have an active daily reminder" in tasks.cancel_daily_reminder("owner")
+
+
+def test_pending_tasks_returns_structured_rows():
+    tasks.add_task("owner", ["Renew", "passport"])
+    rows = tasks.pending_tasks("owner")
+    assert len(rows) == 1
+    assert rows[0]["title"] == "Renew passport"
+    assert "id" in rows[0]
+
+
+def test_get_next_reminder_none_when_nothing_scheduled():
+    assert tasks.get_next_reminder("owner") is None
+
+
+def test_get_next_reminder_picks_the_sooner_one_off():
+    tasks.add_reminder("owner", ["120", "call", "mom"])
+    tasks.add_reminder("owner", ["10", "stretch"])
+
+    next_reminder = tasks.get_next_reminder("owner")
+    assert next_reminder["message"] == "stretch"
+
+
+def test_get_next_reminder_ignores_past_one_offs():
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO reminders (chat_id, message, fire_at, delivered) VALUES (?, ?, ?, 0)",
+            ("owner", "already passed", (datetime.datetime.now() - datetime.timedelta(minutes=5)).isoformat()),
+        )
+    assert tasks.get_next_reminder("owner") is None
+
+
+def test_get_next_reminder_compares_daily_reminder_against_one_off():
+    tasks.add_reminder("owner", ["600", "far away"])  # 10 hours from now
+
+    future_hour = (datetime.datetime.now() + datetime.timedelta(hours=1)).hour
+    tasks.add_daily_reminder("owner", future_hour, 0, "daily check-in")
+
+    next_reminder = tasks.get_next_reminder("owner")
+    assert next_reminder["message"] == "daily check-in"
+
+
+def test_get_next_reminder_daily_rolls_to_tomorrow_once_fired_today():
+    tasks.add_daily_reminder("owner", 9, 0, "daily check-in")
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE daily_reminders SET last_fired_date = ? WHERE chat_id = ?",
+            (datetime.date.today().isoformat(), "owner"),
+        )
+
+    next_reminder = tasks.get_next_reminder("owner")
+    next_date = datetime.datetime.fromisoformat(next_reminder["fire_at"]).date()
+    assert next_date == datetime.date.today() + datetime.timedelta(days=1)

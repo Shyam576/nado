@@ -5,69 +5,63 @@
     <p class="date-sub" id="date-sub">&nbsp;</p>
     <div class="error-banner" id="error-banner" style="display:none"></div>
 
-    <div class="card">
-      <h2>Morning plan</h2>
-      <form id="morning-plan-form">
-        <div class="row">
-          <div class="field">
-            <label for="target-start-time">Target start time</label>
-            <input type="time" id="target-start-time">
-          </div>
-        </div>
-        <div class="field">
-          <label for="must-not-slip">One commitment that must not slip today</label>
-          <input type="text" id="must-not-slip" placeholder="e.g. Send the client response by 5pm">
-        </div>
-        <button type="submit" class="primary">Save</button>
-      </form>
+    <div class="hero-zone" id="hero-zone">
+      <div class="hero-slip" id="hero-must-not-slip" style="display:none"></div>
+      <div class="hero-priority" id="hero-top-priority" style="display:none"></div>
+      <p class="muted" id="hero-empty" style="display:none;margin:0">
+        Nothing planned yet — add a priority below.
+      </p>
+    </div>
 
-      <h2 style="margin-top:1.5rem">Priorities</h2>
-      <ul class="priority-list" id="priority-list"></ul>
-      <form id="add-priority-form" class="row">
-        <input type="text" id="new-priority-title" placeholder="Add a priority...">
-        <button type="submit">Add</button>
-      </form>
+    <div class="today-columns">
+      <div class="card">
+        <h2>Morning plan</h2>
+        <form id="morning-plan-form">
+          <div class="row">
+            <div class="field">
+              <label for="target-start-time">Target start time</label>
+              <input type="time" id="target-start-time">
+            </div>
+          </div>
+          <div class="field">
+            <label for="must-not-slip">One commitment that must not slip today</label>
+            <input type="text" id="must-not-slip" placeholder="e.g. Send the client response by 5pm">
+          </div>
+          <button type="submit" class="primary">Save</button>
+        </form>
+
+        <h2 style="margin-top:1.5rem">Priorities</h2>
+        <ul class="priority-list" id="priority-list"></ul>
+        <form id="add-priority-form" class="row">
+          <input type="text" id="new-priority-title" placeholder="Add a priority...">
+          <button type="submit">Add</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Context</h2>
+        <p class="context-subhead">Pending tasks</p>
+        <ul class="context-list" id="context-tasks"></ul>
+        <p class="context-subhead">Today's calendar</p>
+        <ul class="context-list" id="context-calendar"></ul>
+      </div>
     </div>
 
     <div class="card">
       <h2>Evening review</h2>
 
-      <form id="review-form">
-        <div class="field">
-          <label for="actual-start-time">Actual start/arrival time</label>
-          <input type="time" id="actual-start-time">
+      <div id="review-start">
+        <button id="start-review-btn" class="primary">Start evening review</button>
+      </div>
+
+      <div id="review-wizard" style="display:none">
+        <div class="wizard-progress" id="wizard-progress"></div>
+        <div class="wizard-step" id="wizard-step"></div>
+        <div class="wizard-nav">
+          <button id="wizard-back" class="ghost">Back</button>
+          <button id="wizard-next" class="primary">Next</button>
         </div>
-        <div class="field">
-          <label>Was I punctual?</label>
-          <div class="pill-group">
-            <div class="pill" data-pill-group="punctual" data-pill-value="yes">Yes</div>
-            <div class="pill" data-pill-group="punctual" data-pill-value="no">No</div>
-          </div>
-        </div>
-        <div class="field">
-          <label>Did I work according to priorities, or mostly react to incoming work?</label>
-          <div class="pill-group">
-            <div class="pill" data-pill-group="worked-by-priority" data-pill-value="yes">Followed the plan</div>
-            <div class="pill" data-pill-group="worked-by-priority" data-pill-value="no">Mostly reactive</div>
-          </div>
-        </div>
-        <div class="field">
-          <label for="execution-score">Daily execution score</label>
-          <div class="score-row">
-            <input type="range" id="execution-score" min="1" max="10" value="5">
-            <span class="score-value" id="execution-score-value">5</span>
-          </div>
-        </div>
-        <div class="field">
-          <label for="adjustment-tomorrow">One adjustment for tomorrow</label>
-          <textarea id="adjustment-tomorrow" placeholder="e.g. Start 15 minutes earlier"></textarea>
-        </div>
-        <button type="submit" class="primary">Submit review</button>
-        <p class="muted" style="font-size:.75rem;margit-top:.5rem">
-          Mark priorities done or carried forward above before submitting — this review reflects
-          how they currently stand.
-        </p>
-      </form>
+      </div>
 
       <div id="review-result" style="display:none">
         <dl class="review-summary" id="review-summary"></dl>

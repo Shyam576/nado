@@ -70,3 +70,32 @@ def test_format_time(hhmm, expected):
 def test_today_events_non_macos(monkeypatch):
     monkeypatch.setattr(calendar_app.sys, "platform", "linux")
     assert "only wired up for macOS" in calendar_app.today_events()
+
+
+def test_get_today_events_returns_structured_sorted_list(monkeypatch):
+    raw = "14:30||Meeting\n09:00||Standup\n"
+    monkeypatch.setattr(calendar_app, "_run_applescript", lambda script: raw)
+
+    events = calendar_app.get_today_events()
+    assert events == [
+        {"time": "09:00", "summary": "Standup"},
+        {"time": "14:30", "summary": "Meeting"},
+    ]
+
+
+def test_get_today_events_empty_list_when_no_events(monkeypatch):
+    monkeypatch.setattr(calendar_app, "_run_applescript", lambda script: "")
+    assert calendar_app.get_today_events() == []
+
+
+def test_get_today_events_none_on_failure(monkeypatch):
+    def _boom(script):
+        raise RuntimeError("Automation permission denied")
+
+    monkeypatch.setattr(calendar_app, "_run_applescript", _boom)
+    assert calendar_app.get_today_events() is None
+
+
+def test_get_today_events_none_on_non_macos(monkeypatch):
+    monkeypatch.setattr(calendar_app.sys, "platform", "linux")
+    assert calendar_app.get_today_events() is None

@@ -12,12 +12,22 @@
     <a href="/" class="{{ 'active' if active_page == 'today' else '' }}">Today</a>
     <a href="/week" class="{{ 'active' if active_page == 'week' else '' }}">Week</a>
     <a href="/progress" class="{{ 'active' if active_page == 'progress' else '' }}">Progress</a>
+    <a href="/life" class="{{ 'active' if active_page == 'life' else '' }}">Life</a>
     <a href="/mentorship" class="{{ 'active' if active_page == 'mentorship' else '' }}">Mentorship</a>
     <form method="post" action="/logout"><button type="submit" class="ghost">Sign out</button></form>
   </nav>
+  <div id="header-strip" class="header-strip">
+    <span id="header-date" class="header-item muted">&nbsp;</span>
+    <span id="header-must-not-slip" class="header-item header-must-not-slip" style="display:none"></span>
+    <span id="header-next-reminder" class="header-item muted" style="display:none"></span>
+    <a id="header-k8s-badge" class="header-badge" href="/life" style="display:none">
+      <span class="header-badge-dot"></span><span id="header-k8s-count"></span>
+    </a>
+  </div>
   <main>
     {% block content %}{% endblock %}
   </main>
+  <script src="/static/header.js"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

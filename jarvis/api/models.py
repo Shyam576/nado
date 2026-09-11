@@ -95,6 +95,29 @@ class TodayOut(BaseModel):
     priorities: list[PriorityOut]
 
 
+class TaskOut(BaseModel):
+    id: int
+    title: str
+
+
+class CalendarEventOut(BaseModel):
+    time: str
+    summary: str
+
+
+class TodayContextOut(BaseModel):
+    pending_tasks: list[TaskOut]
+    calendar_events: Optional[list[CalendarEventOut]] = None
+
+
+class ReviewSuggestionsOut(BaseModel):
+    suggested_actual_start_time: Optional[str] = None
+    suggested_punctual: Optional[bool] = None
+    suggested_score: Optional[int] = None
+    suggested_adjustment: str
+    carry_forward_reasons: list[str]
+
+
 # ---------------------------------------------------------------------------
 # Week — requests
 # ---------------------------------------------------------------------------
@@ -117,6 +140,32 @@ class WeeklyReviewIn(BaseModel):
     reason: Optional[str] = None
     pattern_observed: Optional[str] = None
     next_week_adjustment: Optional[str] = None
+
+
+class IncompleteOutcomeOut(BaseModel):
+    id: int
+    title: str
+
+
+class IncompletePriorityOut(BaseModel):
+    id: int
+    title: str
+
+
+class IncompleteItemsOut(BaseModel):
+    outcomes: list[IncompleteOutcomeOut]
+    priorities: list[IncompletePriorityOut]
+
+
+class ReasonCountOut(BaseModel):
+    reason: str
+    count: int
+
+
+class WeeklyReviewSuggestionsOut(BaseModel):
+    incomplete_items: IncompleteItemsOut
+    carry_forward_reasons: list[ReasonCountOut]
+    common_adjustment: Optional[str] = None
 
 
 class CycleIn(BaseModel):
@@ -211,6 +260,24 @@ class MentorSummaryOut(BaseModel):
     summary: str
 
 
+# ---------------------------------------------------------------------------
+# Header strip / Life page (read-only glance widgets)
+# ---------------------------------------------------------------------------
+
+
+class NextReminderOut(BaseModel):
+    message: str
+    fire_at: str
+
+
+class HeaderOut(BaseModel):
+    date: str
+    must_not_slip: Optional[str] = None
+    next_reminder: Optional[NextReminderOut] = None
+    k8s_healthy: bool
+    k8s_unhealthy_count: int
+
+
 class MentorshipContextOut(BaseModel):
     development_action: Optional[str] = None
     what: Optional[str] = None
@@ -220,6 +287,86 @@ class MentorshipContextOut(BaseModel):
     where: Optional[str] = None
     how: Optional[str] = None
     how_much: Optional[str] = None
+
+
+class SpendCategoryOut(BaseModel):
+    category: str
+    total: float
+
+
+class GoldPriceOut(BaseModel):
+    price: float
+    change_24h_pct: Optional[float] = None
+
+
+class TerCurrencyOut(BaseModel):
+    ask: float
+    bid: float
+    change_24h_pct: Optional[float] = None
+
+
+class TerTickerOut(BaseModel):
+    usd: Optional[TerCurrencyOut] = None
+    inr: Optional[TerCurrencyOut] = None
+    btn: Optional[TerCurrencyOut] = None
+
+
+class MoneyOut(BaseModel):
+    month_total: float
+    month_count: int
+    budget: Optional[float] = None
+    remaining: Optional[float] = None
+    pct_used: Optional[float] = None
+    by_category: list[SpendCategoryOut]
+    gold: Optional[GoldPriceOut] = None
+    ter: TerTickerOut
+
+
+class SystemDeploymentOut(BaseModel):
+    name: str
+    status: str
+    detail: Optional[str] = None
+
+
+class SystemOut(BaseModel):
+    namespace: str
+    healthy: bool
+    checked: bool
+    unhealthy_count: int
+    deployments: list[SystemDeploymentOut]
+
+
+class MoodEntryOut(BaseModel):
+    mood: str
+    energy: Optional[int] = None
+    created_at: str
+
+
+class HabitStreakOut(BaseModel):
+    habit: str
+    streak: int
+    days_this_week: int
+
+
+class MoodOut(BaseModel):
+    week_trend: list[MoodEntryOut]
+    habits: list[HabitStreakOut]
+
+
+class UpcomingBirthdayOut(BaseModel):
+    name: str
+    birthday: str
+    days_away: int
+
+
+class StaleContactOut(BaseModel):
+    name: str
+    days_since_contact: int
+
+
+class PeopleGlanceOut(BaseModel):
+    upcoming_birthdays: list[UpcomingBirthdayOut]
+    no_contact: list[StaleContactOut]
 
 
 class MentorshipContextIn(BaseModel):

@@ -125,3 +125,21 @@ def test_today_summary_non_macos(monkeypatch):
     monkeypatch.setattr(activity, "_run_applescript", _fail)
     activity.sample_frontmost("owner")
     assert not called
+
+
+def test_first_sample_time_returns_earliest():
+    today = datetime.date.today()
+    _insert_sample("owner", "Chrome", "tab", datetime.datetime.combine(today, datetime.time(9, 15)))
+    _insert_sample("owner", "iTerm2", "session", datetime.datetime.combine(today, datetime.time(8, 40)))
+
+    assert activity.first_sample_time("owner") == "08:40"
+
+
+def test_first_sample_time_none_when_no_samples():
+    assert activity.first_sample_time("owner") is None
+
+
+def test_first_sample_time_scoped_to_date():
+    yesterday = datetime.date.today() - datetime.timedelta(days=1)
+    _insert_sample("owner", "Chrome", "tab", datetime.datetime.combine(yesterday, datetime.time(7, 0)))
+    assert activity.first_sample_time("owner") is None

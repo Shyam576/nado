@@ -3,7 +3,7 @@
 import datetime
 
 import memory
-from modules import nudges, tasks
+from modules import execution, nudges, tasks
 from store.db import get_connection
 
 
@@ -84,3 +84,25 @@ def test_related_task_note_finds_matching_pending_task():
 def test_related_task_note_empty_when_no_match():
     tasks.add_task("owner", ["Buy", "groceries"])
     assert nudges.related_task_note("owner", "gold") == ""
+
+
+def test_evening_review_nudge_fires_when_not_reviewed():
+    nudge = nudges.evening_review_nudge("owner")
+    assert nudge is not None
+    assert "evening review" in nudge
+
+
+def test_evening_review_nudge_silent_once_reviewed():
+    execution.submit_evening_review("owner", execution_score=7)
+    assert nudges.evening_review_nudge("owner") is None
+
+
+def test_no_priorities_nudge_fires_when_nothing_planned():
+    nudge = nudges.no_priorities_nudge("owner")
+    assert nudge is not None
+    assert "priorities" in nudge
+
+
+def test_no_priorities_nudge_silent_once_a_priority_exists():
+    execution.add_priority("owner", "Fix deployment")
+    assert nudges.no_priorities_nudge("owner") is None

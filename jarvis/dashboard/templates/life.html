@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Jarvis — Life{% endblock %}
+{% block content %}
+    <h1>Life</h1>
+    <p class="date-sub muted" style="margin:0 0 1.75rem">
+      Read-only — everything here comes from what you've already logged via chat/voice.
+    </p>
+    <div class="error-banner" id="error-banner" style="display:none"></div>
+
+    <div class="life-grid">
+      <div class="card viz-root">
+        <h2>Money</h2>
+        <div class="stat-tiles" id="money-tiles"></div>
+        <h3 class="context-subhead">Budget pacing</h3>
+        <div id="budget-meter"></div>
+        <h3 class="context-subhead">Spend by category (this month)</h3>
+        <div id="spend-chart"></div>
+      </div>
+
+      <div class="card viz-root">
+        <h2>Mood &amp; habits</h2>
+        <h3 class="context-subhead">Energy, last 7 days</h3>
+        <div class="chart-container" id="mood-chart"></div>
+        <h3 class="context-subhead">Habit streaks</h3>
+        <div class="streak-chips" id="habit-streaks"></div>
+      </div>
+
+      <div class="card">
+        <h2>People</h2>
+        <h3 class="context-subhead">Upcoming birthdays</h3>
+        <ul class="glance-list" id="upcoming-birthdays"></ul>
+        <h3 class="context-subhead">Haven't talked in a while</h3>
+        <ul class="glance-list" id="stale-contacts"></ul>
+      </div>
+
+      <div class="card">
+        <h2>System</h2>
+        <div id="system-tile"></div>
+      </div>
+    </div>
+{% endblock %}
+{% block scripts %}
+  <script src="/static/charts.js"></script>
+  <script src="/static/life.js"></script>
+{% endblock %}

@@ -74,6 +74,28 @@ def test_budget_status_excludes_previous_month():
     assert "0.00 BTN spent across 0 expenses" in result
 
 
+def test_get_budget_summary_structured():
+    expenses.set_budget("owner", ["1000"])
+    _insert_expense("owner", 300.0, "Food", datetime.datetime.now())
+    _insert_expense("owner", 100.0, "Transport", datetime.datetime.now())
+
+    summary = expenses.get_budget_summary("owner")
+    assert summary["total"] == 400.0
+    assert summary["count"] == 2
+    assert summary["budget"] == 1000.0
+    assert summary["remaining"] == 600.0
+    assert summary["pct_used"] == 40.0
+    assert summary["by_category"][0] == {"category": "Food", "total": 300.0}
+
+
+def test_get_budget_summary_without_budget_set():
+    _insert_expense("owner", 200.0, "Food", datetime.datetime.now())
+    summary = expenses.get_budget_summary("owner")
+    assert summary["budget"] is None
+    assert summary["remaining"] is None
+    assert summary["pct_used"] is None
+
+
 def test_set_budget_validation():
     assert "Usage" in expenses.set_budget("owner", [])
     assert "Usage" in expenses.set_budget("owner", ["not-a-number"])

@@ -8,6 +8,7 @@ no LLM round-trip needed for structured task/reminder operations
 
 import datetime
 import logging
+from typing import Optional
 
 from store.db import ALLOWED_TASK_TRANSITIONS, get_connection
 
@@ -179,6 +180,67 @@ def today_summary(chat_id: str) -> str:
             lines.append(f"  • {when} — {row['message']}")
 
     return "\n".join(lines)
+
+
+def get_next_reminder(chat_id: str) -> Optional[dict]:
+    """Return the soonest upcoming reminder — one-off or daily — for the header strip.
+
+    reminders and daily_reminders are separate tables with different shapes
+    (a fixed timestamp vs. a recurring hour/minute) — this is the first
+    function that unifies them into one "what's next" answer.
+
+    Args:
+        chat_id: The owner to look up.
+
+    Returns:
+        {"message": str, "fire_at": <ISO datetime string>}, or None if
+        nothing is scheduled.
+    """
+    now = datetime.datetime.now()
+    candidates: list[dict] = []
+
+    with get_connection() as conn:
+        one_off = conn.execute(
+            "SELECT message, fire_at FROM reminders "
+            "WHERE chat_id = ? AND delivered = 0 AND fire_at > ? ORDER BY fire_at LIMIT 1",
+            (chat_id, now.isoformat()),
+        ).fetchone()
+        if one_off:
+            candidates.append({"message": one_off["message"], "fire_at": one_off["fire_at"]})
+
+        daily = conn.execute(
+            "SELECT message, hour, minute, last_fired_date FROM daily_reminders "
+            "WHERE chat_id = ? AND enabled = 1",
+            (chat_id,),
+        ).fetchone()
+
+    if daily:
+        today = now.date()
+        already_fired_today = daily["last_fired_date"] == today.isoformat()
+        next_date = today + datetime.timedelta(days=1) if already_fired_today else today
+        next_fire_at = datetime.datetime.combine(next_date, datetime.time(daily["hour"], daily["minute"]))
+        candidates.append({"message": daily["message"], "fire_at": next_fire_at.isoformat()})
+
+    if not candidates:
+        return None
+    return min(candidates, key=lambda c: c["fire_at"])
+
+
+def pending_tasks(chat_id: str) -> list[dict]:
+    """Return pending tasks as structured data (the API/dashboard sibling of list_tasks()).
+
+    Args:
+        chat_id: The chat whose tasks to look up.
+
+    Returns:
+        A list of dicts with keys: id, title.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, title FROM tasks WHERE chat_id = ? AND status = 'pending' ORDER BY created_at",
+            (chat_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def weekly_stats(chat_id: str) -> dict:

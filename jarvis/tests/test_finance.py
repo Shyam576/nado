@@ -97,3 +97,41 @@ def test_change_line_reports_percentage_up_and_down():
     down = finance._change_line("Gold", 2500.0, 2600.0, "$")
     assert "▼" in down
     assert "-3.8%" in down
+
+
+def test_get_price_ticker_structure_with_all_currencies(monkeypatch):
+    monkeypatch.setattr(finance, "_fetch_gold_price", lambda: {"price": 2650.0})
+    monkeypatch.setattr(
+        finance,
+        "_fetch_ter_prices",
+        lambda: {
+            "TERUSD": {"ask_price": 13500, "bid_price": 13200},
+            "TERINR": {"ask_price": 115000, "bid_price": 114000},
+            "TERBTN": {"ask_price": 12800, "bid_price": 12500},
+        },
+    )
+
+    ticker = finance.get_price_ticker()
+    assert ticker["gold"]["price"] == 2650.0
+    assert ticker["gold"]["change_24h_pct"] is None  # no snapshot baseline yet
+    assert ticker["ter"]["usd"] == {"ask": 1.35, "bid": 1.32, "change_24h_pct": None}
+    assert ticker["ter"]["inr"] == {"ask": 11.5, "bid": 11.4, "change_24h_pct": None}
+    assert ticker["ter"]["btn"]["ask"] == 1.28
+
+
+def test_get_price_ticker_computes_change_from_snapshot_baseline(monkeypatch):
+    monkeypatch.setattr(finance, "_fetch_gold_price", lambda: {"price": 2650.0})
+    monkeypatch.setattr(finance, "_fetch_ter_prices", lambda: {"TERBTN": {"ask_price": 12800, "bid_price": 12500}})
+    monkeypatch.setattr(finance, "_baseline_price", lambda symbol: 2600.0 if symbol == "GOLD_USD" else 1.25)
+
+    ticker = finance.get_price_ticker()
+    assert round(ticker["gold"]["change_24h_pct"], 2) == round(100 * (2650 - 2600) / 2600, 2)
+    assert round(ticker["ter"]["btn"]["change_24h_pct"], 2) == round(100 * (1.28 - 1.25) / 1.25, 2)
+
+
+def test_get_price_ticker_handles_total_fetch_failure(monkeypatch):
+    monkeypatch.setattr(finance, "_fetch_gold_price", lambda: None)
+    monkeypatch.setattr(finance, "_fetch_ter_prices", lambda: None)
+
+    ticker = finance.get_price_ticker()
+    assert ticker == {"gold": None, "ter": {"usd": None, "inr": None, "btn": None}}

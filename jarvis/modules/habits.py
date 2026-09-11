@@ -132,6 +132,29 @@ def weekly_habit_adherence(chat_id: str) -> list[dict]:
     return results
 
 
+def habit_streaks(chat_id: str) -> list[dict]:
+    """Return each tracked habit's current streak alongside this week's adherence.
+
+    Public sibling combining weekly_habit_adherence() and _current_streak()
+    for the Life page's habit widget — the API layer only calls public
+    module functions, never reaches into a private (leading-underscore) one.
+
+    Args:
+        chat_id: The chat to look up.
+
+    Returns:
+        A list of dicts with keys: habit, streak (int), days_this_week (0-7).
+    """
+    return [
+        {
+            "habit": row["habit"],
+            "streak": _current_streak(chat_id, row["habit"]),
+            "days_this_week": row["days_logged"],
+        }
+        for row in weekly_habit_adherence(chat_id)
+    ]
+
+
 def log_habit(chat_id: str = "", args: list[str] | None = None) -> str:
     """Log today's completion of a habit (idempotent — one log per day).
 

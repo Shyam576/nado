@@ -133,6 +133,55 @@ def _pod_status_by_deployment(namespace: str) -> Optional[dict[str, "collections
     return by_deployment
 
 
+def k8s_health_summary(namespace: Optional[str] = None) -> dict:
+    """Pure-read K8s health snapshot for glance widgets — no alerts, no task creation.
+
+    Unlike check_k8s_health() (side effects: alert dedup state + task
+    creation) and k8s_health() (formatted text for /status), this returns
+    structured data safe to call on every dashboard page load — the header
+    strip and the Life page's system tile both use this, never the two
+    alert-generating functions above.
+
+    Args:
+        namespace: Override namespace, defaults to K8S_NAMESPACE.
+
+    Returns:
+        {
+          "namespace": str,
+          "healthy": bool,        # True if confirmed healthy OR couldn't check —
+                                   # a glance badge shouldn't cry wolf over a
+                                   # transient Prometheus/network hiccup
+          "checked": bool,        # False if the query itself failed
+          "unhealthy_count": int,
+          "deployments": [{"name": str, "status": "healthy"|"unhealthy", "detail": str|None}, ...],
+        }
+    """
+    namespace = namespace or K8S_NAMESPACE
+    by_deployment = _pod_status_by_deployment(namespace)
+    if by_deployment is None:
+        return {"namespace": namespace, "healthy": True, "checked": False, "unhealthy_count": 0, "deployments": []}
+
+    deployments = []
+    unhealthy_count = 0
+    for name in sorted(by_deployment):
+        phases = by_deployment[name]
+        unhealthy = {p: c for p, c in phases.items() if p != "Running"}
+        if unhealthy:
+            unhealthy_count += 1
+            detail = ", ".join(f"{count} {phase}" for phase, count in unhealthy.items())
+            deployments.append({"name": name, "status": "unhealthy", "detail": detail})
+        else:
+            deployments.append({"name": name, "status": "healthy", "detail": None})
+
+    return {
+        "namespace": namespace,
+        "healthy": unhealthy_count == 0,
+        "checked": True,
+        "unhealthy_count": unhealthy_count,
+        "deployments": deployments,
+    }
+
+
 def k8s_health(chat_id: str = "", args: Optional[list[str]] = None) -> str:
     """Summarise pod status for the configured namespace, grouped by deployment.
 

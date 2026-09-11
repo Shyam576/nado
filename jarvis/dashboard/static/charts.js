@@ -186,3 +186,57 @@ function renderLineChart(container, labels, series, opts = {}) {
   });
   hitArea.addEventListener("pointerleave", hideTooltip);
 }
+
+/**
+ * Render a horizontal bar chart — single series (one hue, no legend needed
+ * per the dataviz skill: "a single series needs no legend box").
+ *
+ * @param container  DOM element to render into.
+ * @param items      [{label, value}, ...] — already sorted by caller.
+ * @param opts       { unit, valueFormat, color }
+ */
+function renderBarChart(container, items, opts = {}) {
+  container.innerHTML = "";
+  if (!items || items.length === 0) {
+    container.innerHTML = '<p class="empty">No data yet.</p>';
+    return;
+  }
+
+  const unit = opts.unit || "";
+  const fmt = opts.valueFormat || ((v) => `${Math.round(v)}${unit}`);
+  const color =
+    opts.color || getComputedStyle(document.querySelector(".viz-root")).getPropertyValue("--series-1").trim();
+  const max = Math.max(...items.map((i) => i.value), 1);
+
+  const rows = document.createElement("div");
+  rows.className = "bar-chart";
+  items.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "bar-row";
+    row.innerHTML = `
+      <span class="bar-label"></span>
+      <div class="bar-track"><div class="bar-fill" style="width:${(item.value / max) * 100}%;background:${color}"></div></div>
+      <span class="bar-value"></span>
+    `;
+    row.querySelector(".bar-label").textContent = item.label;
+    row.querySelector(".bar-value").textContent = fmt(item.value);
+    rows.appendChild(row);
+  });
+  container.appendChild(rows);
+}
+
+/**
+ * Render a meter — the fill carries severity (accent -> warning -> critical),
+ * per the dataviz skill's meter spec. `pct` may exceed 100 (over budget);
+ * the bar itself clamps visually but the label shows the true value.
+ */
+function renderMeter(container, pct, opts = {}) {
+  const label = opts.label;
+  const clamped = Math.max(0, Math.min(pct, 100));
+  const severity = pct >= 100 ? "critical" : pct >= 80 ? "warning" : "good";
+  container.innerHTML = `
+    <div class="meter-track"><div class="meter-fill meter-${severity}" style="width:${clamped}%"></div></div>
+    ${label ? `<div class="meter-label"></div>` : ""}
+  `;
+  if (label) container.querySelector(".meter-label").textContent = label;
+}

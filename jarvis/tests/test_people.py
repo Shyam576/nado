@@ -108,3 +108,59 @@ def test_check_birthdays_ignores_other_dates():
     if datetime.date.today().strftime("%m-%d") == "01-01":
         return  # skip on the one day this fixture would coincidentally fire
     assert people.check_birthdays() == []
+
+
+def test_upcoming_birthdays_within_window():
+    soon = datetime.date.today() + datetime.timedelta(days=5)
+    far = datetime.date.today() + datetime.timedelta(days=200)
+    people.set_birthday("owner", ["Sarah", soon.strftime("%m-%d")])
+    people.set_birthday("owner", ["Tom", far.strftime("%m-%d")])
+
+    upcoming = people.upcoming_birthdays("owner", within_days=30)
+    assert len(upcoming) == 1
+    assert upcoming[0]["name"] == "Sarah"
+    assert upcoming[0]["days_away"] == 5
+
+
+def test_upcoming_birthdays_has_no_side_effects():
+    today_md = datetime.date.today().strftime("%m-%d")
+    people.set_birthday("owner", ["Sarah", today_md])
+
+    people.upcoming_birthdays("owner")
+    people.upcoming_birthdays("owner")  # calling twice must not consume any alert-dedup state
+
+    assert people.check_birthdays() != []  # the real alert can still fire today
+
+
+def test_upcoming_birthdays_empty_when_none_set():
+    assert people.upcoming_birthdays("owner") == []
+
+
+def test_stale_contacts_returns_people_past_the_gap():
+    people.add_fact("owner", ["Sarah", "loves", "hiking"])
+    old = (datetime.datetime.now() - datetime.timedelta(days=20)).isoformat()
+    with get_connection() as conn:
+        conn.execute("UPDATE people SET created_at = ? WHERE name = 'Sarah'", (old,))
+
+    stale = people.stale_contacts("owner")
+    assert len(stale) == 1
+    assert stale[0]["name"] == "Sarah"
+    assert stale[0]["days_since_contact"] == 20
+
+
+def test_stale_contacts_excludes_recent_contact():
+    people.add_fact("owner", ["Sarah", "loves", "hiking"])
+    people.mark_contacted("owner", ["Sarah"])
+    assert people.stale_contacts("owner") == []
+
+
+def test_stale_contacts_has_no_side_effects():
+    people.add_fact("owner", ["Sarah", "loves", "hiking"])
+    old = (datetime.datetime.now() - datetime.timedelta(days=20)).isoformat()
+    with get_connection() as conn:
+        conn.execute("UPDATE people SET created_at = ? WHERE name = 'Sarah'", (old,))
+
+    people.stale_contacts("owner")
+    people.stale_contacts("owner")  # calling twice must not consume any alert-dedup state
+
+    assert people.check_followups() != []  # the real nudge can still fire

@@ -5,6 +5,7 @@ import datetime
 
 import brain
 from modules import execution
+from store.db import get_connection
 
 
 def _monday() -> str:
@@ -331,6 +332,76 @@ def test_generate_mentor_summary_handles_llm_failure(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Mentor summary — mood/money enrichment
+# ---------------------------------------------------------------------------
+
+
+def test_week_mood_and_money_computes_avg_energy_and_top_category():
+    week = _monday()
+    week_end = execution._week_end_for(week)
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO mood_log (chat_id, mood, energy, created_at) VALUES (?, ?, ?, ?)",
+            ("owner", "focused", 8, f"{week}T09:00:00"),
+        )
+        conn.execute(
+            "INSERT INTO mood_log (chat_id, mood, energy, created_at) VALUES (?, ?, ?, ?)",
+            ("owner", "focused", 6, f"{week}T18:00:00"),
+        )
+        conn.execute(
+            "INSERT INTO expenses (chat_id, amount, category, created_at) VALUES (?, ?, ?, ?)",
+            ("owner", 500.0, "Food", f"{week}T12:00:00"),
+        )
+
+    context = execution._week_mood_and_money("owner", week, week_end)
+    assert context["avg_energy"] == 7.0
+    assert context["top_mood"] == "focused"
+    assert context["total_spend"] == 500.0
+    assert context["top_category"] == "Food"
+
+
+def test_week_mood_and_money_empty_week():
+    week = _monday()
+    context = execution._week_mood_and_money("owner", week, execution._week_end_for(week))
+    assert context == {"avg_energy": None, "top_mood": None, "total_spend": 0, "top_category": None}
+
+
+def test_generate_mentor_summary_includes_mood_and_spend_in_llm_context(monkeypatch):
+    week = _monday()
+    p = execution.add_priority("owner", "A", date=week)
+    execution.complete_priority("owner", p["id"])
+    execution.submit_evening_review("owner", week, punctual=True)
+    cycle_start = (datetime.date.fromisoformat(week) - datetime.timedelta(days=7)).isoformat()
+    execution.create_cycle("owner", "Cycle", cycle_start, week)
+
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO mood_log (chat_id, mood, energy, created_at) VALUES (?, ?, ?, ?)",
+            ("owner", "stressed", 3, f"{week}T09:00:00"),
+        )
+        conn.execute(
+            "INSERT INTO expenses (chat_id, amount, category, created_at) VALUES (?, ?, ?, ?)",
+            ("owner", 1200.0, "Junk", f"{week}T12:00:00"),
+        )
+
+    captured = {}
+
+    class _FakeLLM:
+        def create_chat_completion(self, **kwargs):
+            captured["messages"] = kwargs["messages"]
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(brain, "_get_llm", lambda: _FakeLLM())
+
+    execution.generate_mentor_summary("owner")
+    context = captured["messages"][1]["content"]
+    assert "Avg energy: 3.0/10" in context
+    assert "stressed" in context
+    assert "1,200.00 BTN" in context
+    assert "Junk" in context
+
+
+# ---------------------------------------------------------------------------
 # Chat-text formatting (shared by bot commands + conversational intents)
 # ---------------------------------------------------------------------------
 
@@ -352,9 +423,9 @@ def test_describe_today_prompts_when_no_priorities():
 
 
 def test_describe_today_lists_priorities_with_status_marks():
-    p = execution.add_priority("owner", "Fix deployment", date="2026-09-07")
+    p = execution.add_priority("owner", "Fix deployment", date=execution._today())
     execution.complete_priority("owner", p["id"])
-    execution.add_priority("owner", "Review PR", date="2026-09-07")
+    execution.add_priority("owner", "Review PR", date=execution._today())
 
     text = execution.describe_today("owner")
     assert "✓ 1. Fix deployment" in text
@@ -407,3 +478,184 @@ def test_set_mentorship_context_saves_and_preserves_unspecified_fields():
     assert ctx["what"] == "Improve punctuality"
     assert ctx["why"] == "Feedback from leadership"
     assert ctx["when"] == "8-12 week cycle"
+
+
+# ---------------------------------------------------------------------------
+# Verdicts
+# ---------------------------------------------------------------------------
+
+
+def test_verdict_for_pct_thresholds():
+    assert execution.verdict_for_pct(85) == "On track"
+    assert execution.verdict_for_pct(80) == "On track"
+    assert execution.verdict_for_pct(60) == "Slipping"
+    assert execution.verdict_for_pct(20) == "Off track"
+    assert execution.verdict_for_pct(None) is None
+
+
+# ---------------------------------------------------------------------------
+# Evening review wizard suggestions
+# ---------------------------------------------------------------------------
+
+
+def test_suggest_execution_score_blends_completion_and_punctuality():
+    date = execution._today()
+    p1 = execution.add_priority("owner", "A", date=date)
+    execution.add_priority("owner", "B", date=date)
+    execution.complete_priority("owner", p1["id"])  # 1 of 2 done = 50%
+
+    score = execution.suggest_execution_score("owner", date, punctual=True)
+    assert score == round(0.5 * 7 + 3)  # 6
+
+
+def test_suggest_execution_score_none_without_any_signal():
+    assert execution.suggest_execution_score("owner", execution._today(), punctual=None) is None
+
+
+def test_suggest_execution_score_clamped_to_1_through_10():
+    date = execution._today()
+    execution.add_priority("owner", "A", date=date)  # 0 of 1 done, not punctual
+    score = execution.suggest_execution_score("owner", date, punctual=False)
+    assert 1 <= score <= 10
+
+
+def test_suggest_adjustment_prompts_for_priorities_when_none_set():
+    assert "Set at least one priority" in execution.suggest_adjustment("owner")
+
+
+def test_suggest_adjustment_calls_llm_with_carry_forward_context(monkeypatch):
+    date = execution._today()
+    p = execution.add_priority("owner", "Fix deployment", date=date)
+    execution.carry_forward_priority("owner", p["id"], reason="Ran out of time")
+
+    captured = {}
+
+    class _FakeLLM:
+        def create_chat_completion(self, **kwargs):
+            captured["messages"] = kwargs["messages"]
+            return {"choices": [{"message": {"content": "Block time for it first thing tomorrow."}}]}
+
+    monkeypatch.setattr(brain, "_get_llm", lambda: _FakeLLM())
+
+    result = execution.suggest_adjustment("owner", date)
+    assert result == "Block time for it first thing tomorrow."
+    assert "Ran out of time" in captured["messages"][1]["content"]
+
+
+def test_suggest_adjustment_handles_llm_failure(monkeypatch):
+    date = execution._today()
+    execution.add_priority("owner", "A", date=date)
+
+    class _BoomLLM:
+        def create_chat_completion(self, **kwargs):
+            raise RuntimeError("model not loaded")
+
+    monkeypatch.setattr(brain, "_get_llm", lambda: _BoomLLM())
+
+    result = execution.suggest_adjustment("owner", date)
+    assert "Reflect on today" in result
+
+
+def test_get_review_suggestions_computes_punctual_from_activity_and_target(monkeypatch):
+    date = execution._today()
+    execution.set_morning_plan("owner", date, target_start_time="09:00")
+    monkeypatch.setattr(
+        "modules.activity.first_sample_time", lambda chat_id, d: "08:45"
+    )
+
+    suggestions = execution.get_review_suggestions("owner", date)
+    assert suggestions["suggested_actual_start_time"] == "08:45"
+    assert suggestions["suggested_punctual"] is True
+
+
+def test_get_review_suggestions_no_punctual_guess_without_target_time(monkeypatch):
+    date = execution._today()
+    monkeypatch.setattr("modules.activity.first_sample_time", lambda chat_id, d: "08:45")
+
+    suggestions = execution.get_review_suggestions("owner", date)
+    assert suggestions["suggested_punctual"] is None
+
+
+def test_get_review_suggestions_bundles_adjustment(monkeypatch):
+    monkeypatch.setattr("modules.activity.first_sample_time", lambda chat_id, d: None)
+    monkeypatch.setattr(execution, "suggest_adjustment", lambda chat_id, date=None: "Some suggestion.")
+
+    suggestions = execution.get_review_suggestions("owner")
+    assert suggestions["suggested_adjustment"] == "Some suggestion."
+    assert suggestions["suggested_actual_start_time"] is None
+
+
+# ---------------------------------------------------------------------------
+# Weekly review wizard suggestions
+# ---------------------------------------------------------------------------
+
+
+def test_weekly_incomplete_items_lists_carried_forward_outcomes_and_priorities():
+    week = _monday()
+    outcome = execution.add_weekly_outcome("owner", "Ship the fix", week_start=week)
+    execution.update_weekly_outcome_status("owner", outcome["id"], "pending", carried_forward=True)
+
+    p = execution.add_priority("owner", "Fix deployment", date=week)
+    execution.carry_forward_priority("owner", p["id"], reason="Ran out of time")
+
+    items = execution.weekly_incomplete_items("owner", week)
+    assert items["outcomes"] == [{"id": outcome["id"], "title": "Ship the fix"}]
+    assert items["priorities"][0]["title"] == "Fix deployment"
+
+
+def test_weekly_incomplete_items_includes_dropped_outcomes():
+    week = _monday()
+    outcome = execution.add_weekly_outcome("owner", "Cancelled thing", week_start=week)
+    execution.update_weekly_outcome_status("owner", outcome["id"], "dropped")
+
+    items = execution.weekly_incomplete_items("owner", week)
+    assert items["outcomes"] == [{"id": outcome["id"], "title": "Cancelled thing"}]
+
+
+def test_weekly_incomplete_items_empty_week():
+    assert execution.weekly_incomplete_items("owner", _monday()) == {"outcomes": [], "priorities": []}
+
+
+def test_weekly_carry_forward_reasons_ranked_by_frequency():
+    week = _monday()
+    p1 = execution.add_priority("owner", "A", date=week)
+    p2 = execution.add_priority("owner", "B", date=week)
+    p3 = execution.add_priority("owner", "C", date=week)
+    execution.carry_forward_priority("owner", p1["id"], reason="Ran out of time")
+    execution.carry_forward_priority("owner", p2["id"], reason="Ran out of time")
+    execution.carry_forward_priority("owner", p3["id"], reason="Blocked by someone else")
+
+    reasons = execution.weekly_carry_forward_reasons("owner", week)
+    assert reasons[0] == {"reason": "Ran out of time", "count": 2}
+    assert reasons[1] == {"reason": "Blocked by someone else", "count": 1}
+
+
+def test_weekly_carry_forward_reasons_falls_back_to_default_taxonomy():
+    reasons = execution.weekly_carry_forward_reasons("owner", _monday())
+    assert [r["reason"] for r in reasons] == execution.CARRY_FORWARD_REASONS
+    assert all(r["count"] == 0 for r in reasons)
+
+
+def test_weekly_common_adjustment_requires_at_least_two_repeats():
+    week = _monday()
+    day1, day2 = week, (datetime.date.fromisoformat(week) + datetime.timedelta(days=1)).isoformat()
+    execution.submit_evening_review("owner", day1, adjustment_for_tomorrow="Start earlier")
+    execution.submit_evening_review("owner", day2, adjustment_for_tomorrow="Start earlier")
+
+    assert execution.weekly_common_adjustment("owner", week) == "Start earlier"
+
+
+def test_weekly_common_adjustment_none_when_no_repeats():
+    execution.submit_evening_review("owner", execution._today(), adjustment_for_tomorrow="A one-off note")
+    assert execution.weekly_common_adjustment("owner", _monday()) is None
+
+
+def test_get_weekly_review_suggestions_bundles_everything():
+    week = _monday()
+    p = execution.add_priority("owner", "Fix deployment", date=week)
+    execution.carry_forward_priority("owner", p["id"], reason="Ran out of time")
+
+    suggestions = execution.get_weekly_review_suggestions("owner", week)
+    assert suggestions["incomplete_items"]["priorities"][0]["title"] == "Fix deployment"
+    assert suggestions["carry_forward_reasons"][0]["reason"] == "Ran out of time"
+    assert suggestions["common_adjustment"] is None

@@ -22,29 +22,18 @@
     <div class="card">
       <h2>Weekly review</h2>
 
-      <form id="review-form">
-        <div class="field">
-          <label for="went-well">What went well this week?</label>
-          <textarea id="went-well"></textarea>
+      <div id="review-start">
+        <button id="start-review-btn" class="primary">Start weekly review</button>
+      </div>
+
+      <div id="review-wizard" style="display:none">
+        <div class="wizard-progress" id="wizard-progress"></div>
+        <div class="wizard-step" id="wizard-step"></div>
+        <div class="wizard-nav">
+          <button id="wizard-back" class="ghost">Back</button>
+          <button id="wizard-next" class="primary">Next</button>
         </div>
-        <div class="field">
-          <label for="failed-follow-through">What did I fail to follow through on?</label>
-          <textarea id="failed-follow-through"></textarea>
-        </div>
-        <div class="field">
-          <label for="reason">Why?</label>
-          <textarea id="reason"></textarea>
-        </div>
-        <div class="field">
-          <label for="pattern-observed">What pattern am I noticing?</label>
-          <textarea id="pattern-observed"></textarea>
-        </div>
-        <div class="field">
-          <label for="next-week-adjustment">What ONE thing will I change next week?</label>
-          <textarea id="next-week-adjustment"></textarea>
-        </div>
-        <button type="submit" class="primary">Submit weekly review</button>
-      </form>
+      </div>
 
       <div id="review-result" style="display:none">
         <dl class="review-summary" id="review-summary"></dl>

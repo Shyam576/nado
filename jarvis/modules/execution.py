@@ -342,6 +342,160 @@ def submit_evening_review(
 
 
 # ---------------------------------------------------------------------------
+# Evening review wizard — suggestions
+#
+# Every value here is a proposed default the wizard shows as editable and
+# overridable, never auto-applied — the dashboard's own write path
+# (submit_evening_review above) is unchanged and doesn't call any of this.
+# ---------------------------------------------------------------------------
+
+# Tappable carry-forward reasons — a starting taxonomy, not a fixed
+# enum enforced anywhere: carry_forward_reason is a free TEXT column, so an
+# "Other" free-text entry is always possible alongside these chips.
+CARRY_FORWARD_REASONS = [
+    "Ran out of time",
+    "Blocked by someone else",
+    "Lower priority than expected",
+    "Still in progress",
+    "No longer relevant",
+]
+
+_ADJUSTMENT_SUGGESTION_SYSTEM = (
+    "You are Jarvis's evening-review assistant. Given today's punctuality and which "
+    "priorities were carried forward (and why), draft ONE short, concrete sentence "
+    "the user can accept as-is or edit — a specific adjustment for tomorrow. Not "
+    "generic advice like 'be more productive' — tie it to what actually happened "
+    "today. Plain text, one sentence, no markdown."
+)
+
+
+def suggest_execution_score(
+    chat_id: str, date: Optional[str] = None, punctual: Optional[bool] = None
+) -> Optional[int]:
+    """Suggest a 1-10 execution score from today's completion rate + punctuality.
+
+    A starting heuristic (70% weight on priorities completed, a 30%-weight
+    bonus for punctuality), not a measured truth — the wizard always shows
+    this as a draggable slider pre-set to the suggestion, never auto-applied.
+
+    Args:
+        chat_id: The owner to compute for.
+        date: ISO date, defaults to today.
+        punctual: Pre-computed punctuality for the day (e.g. from comparing
+            target vs. a suggested actual start time). Not read from
+            daily_plans.punctual — at suggestion time the review hasn't been
+            submitted yet, so that column is still null.
+
+    Returns:
+        An integer 1-10, or None if there's nothing to base a suggestion on
+        (no priorities logged and punctuality unknown).
+    """
+    priorities = get_priorities(chat_id, date or _today())
+    completion_pct = (
+        100.0 * sum(1 for p in priorities if p["status"] == "done") / len(priorities) if priorities else None
+    )
+
+    if completion_pct is None and punctual is None:
+        return None
+
+    score = (completion_pct / 100.0) * 7 if completion_pct is not None else 0
+    score += 3 if punctual else 0
+    return max(1, min(10, round(score)))
+
+
+def suggest_adjustment(chat_id: str, date: Optional[str] = None) -> str:
+    """Draft a one-line "adjustment for tomorrow" via a one-shot LLM call.
+
+    Grounded in today's actual carry-forward reasons and punctuality — same
+    fresh-call pattern as generate_mentor_summary() (doesn't touch
+    brain._history). The wizard shows the result as an editable draft.
+
+    Args:
+        chat_id: The owner to draft for.
+        date: ISO date, defaults to today.
+
+    Returns:
+        A one-sentence suggestion, or a plain fallback if there's not enough
+        data yet or the LLM call fails.
+    """
+    import brain  # local import — avoids loading the model at module import time
+
+    date = date or _today()
+    plan = get_or_create_daily_plan(chat_id, date)
+    priorities = get_priorities(chat_id, date)
+
+    if not priorities:
+        return "Set at least one priority tomorrow morning to build momentum."
+
+    carried = [p for p in priorities if p["status"] == "carried_forward"]
+    context_lines = [
+        f"Punctual: {'yes' if plan['punctual'] else 'no' if plan['punctual'] is not None else 'unknown'}"
+    ]
+    if carried:
+        context_lines.append("Carried forward:")
+        for p in carried:
+            reason = f" — {p['carry_forward_reason']}" if p["carry_forward_reason"] else ""
+            context_lines.append(f"  {p['title']}{reason}")
+    else:
+        context_lines.append("Nothing carried forward.")
+
+    try:
+        llm = brain._get_llm()
+        response = llm.create_chat_completion(
+            messages=[
+                {"role": "system", "content": _ADJUSTMENT_SUGGESTION_SYSTEM},
+                {"role": "user", "content": "\n".join(context_lines)},
+            ],
+            max_tokens=60,
+            temperature=0.5,
+        )
+        return response["choices"][0]["message"]["content"].strip()
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Adjustment suggestion generation failed: %s", exc)
+        return "Reflect on today and note one thing to change tomorrow."
+
+
+def get_review_suggestions(chat_id: str, date: Optional[str] = None) -> dict:
+    """Bundle every evening-review wizard pre-fill into one call.
+
+    Args:
+        chat_id: The owner to compute suggestions for.
+        date: ISO date, defaults to today.
+
+    Returns:
+        {
+          "suggested_actual_start_time": "HH:MM" | None,  # from activity.first_sample_time
+          "suggested_punctual": bool | None,               # target vs. suggested actual time
+          "suggested_score": int | None,
+          "suggested_adjustment": str,
+        }
+        suggested_punctual is None (never guessed) if either time is
+        missing/malformed — the wizard just asks directly in that case.
+    """
+    from modules import activity  # local import — avoids a module-load cycle at import time
+
+    date = date or _today()
+    plan = get_or_create_daily_plan(chat_id, date)
+
+    suggested_start = activity.first_sample_time(chat_id, date)
+    suggested_punctual = None
+    if suggested_start and plan["target_start_time"]:
+        try:
+            target = datetime.datetime.strptime(plan["target_start_time"], "%H:%M")
+            actual = datetime.datetime.strptime(suggested_start, "%H:%M")
+            suggested_punctual = actual <= target
+        except ValueError:
+            suggested_punctual = None  # malformed stored time — don't guess, just ask
+
+    return {
+        "suggested_actual_start_time": suggested_start,
+        "suggested_punctual": suggested_punctual,
+        "suggested_score": suggest_execution_score(chat_id, date, punctual=suggested_punctual),
+        "suggested_adjustment": suggest_adjustment(chat_id, date),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Weekly plan / outcomes
 # ---------------------------------------------------------------------------
 
@@ -460,6 +614,28 @@ def get_weekly_outcomes(chat_id: str, week_start: Optional[str] = None) -> list[
 # ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
+
+
+def verdict_for_pct(pct: Optional[float]) -> Optional[str]:
+    """Map a percentage metric to a short glance verdict instead of a raw number.
+
+    Starting thresholds (80/50), easy to tune — used by glance views (the
+    Week page's scorecard); Progress's trend charts keep exact numbers,
+    never verdicts, per the "percentages for trends only" rule.
+
+    Args:
+        pct: A percentage value (0-100), or None if not yet computable.
+
+    Returns:
+        "On track" / "Slipping" / "Off track", or None if `pct` is None.
+    """
+    if pct is None:
+        return None
+    if pct >= 80:
+        return "On track"
+    if pct >= 50:
+        return "Slipping"
+    return "Off track"
 
 
 def compute_week_metrics(chat_id: str, week_start: Optional[str] = None) -> dict:
@@ -634,6 +810,135 @@ def get_week(chat_id: str, week_start: Optional[str] = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Weekly review wizard — suggestions (chips seeded from what actually
+# happened this week, not a fixed generic list where one exists).
+# ---------------------------------------------------------------------------
+
+
+def weekly_incomplete_items(chat_id: str, week_start: Optional[str] = None) -> dict:
+    """Return this week's carried-forward/dropped items — chips for the weekly
+    review's "what did I fail to follow through on" step.
+
+    Args:
+        chat_id: The owner to look up.
+        week_start: Any ISO date in the target week, defaults to this week.
+
+    Returns:
+        {
+          "outcomes": [{"id": int, "title": str}, ...],    # dropped, or carried_forward=1
+          "priorities": [{"id": int, "title": str}, ...],  # carried_forward this week
+        }
+    """
+    week_start = week_start_for(week_start or _today())
+    week_end = _week_end_for(week_start)
+
+    with get_connection() as conn:
+        outcome_rows = conn.execute(
+            "SELECT o.id, o.title FROM weekly_outcomes o JOIN weekly_plans p ON o.weekly_plan_id = p.id "
+            "WHERE p.chat_id = ? AND p.week_start = ? AND (o.status = 'dropped' OR o.carried_forward = 1) "
+            "ORDER BY o.outcome_order",
+            (chat_id, week_start),
+        ).fetchall()
+
+        priority_rows = conn.execute(
+            "SELECT pr.id, pr.title FROM daily_priorities pr JOIN daily_plans d ON pr.daily_plan_id = d.id "
+            "WHERE d.chat_id = ? AND d.date >= ? AND d.date <= ? AND pr.status = 'carried_forward' "
+            "ORDER BY pr.created_at",
+            (chat_id, week_start, week_end),
+        ).fetchall()
+
+    return {
+        "outcomes": [dict(r) for r in outcome_rows],
+        "priorities": [dict(r) for r in priority_rows],
+    }
+
+
+def weekly_carry_forward_reasons(chat_id: str, week_start: Optional[str] = None) -> list[dict]:
+    """Return this week's carry-forward reasons, most common first.
+
+    Chips for the weekly review's "why" step, seeded from what actually
+    happened this week rather than always showing the same generic list.
+
+    Args:
+        chat_id: The owner to look up.
+        week_start: Any ISO date in the target week, defaults to this week.
+
+    Returns:
+        A list of {"reason": str, "count": int} dicts, most frequent first.
+        Falls back to CARRY_FORWARD_REASONS (count=0 each) if nothing was
+        recorded this week, so the step always has something to tap.
+    """
+    week_start = week_start_for(week_start or _today())
+    week_end = _week_end_for(week_start)
+
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT pr.carry_forward_reason AS reason, COUNT(*) AS n "
+            "FROM daily_priorities pr JOIN daily_plans d ON pr.daily_plan_id = d.id "
+            "WHERE d.chat_id = ? AND d.date >= ? AND d.date <= ? "
+            "AND pr.carry_forward_reason IS NOT NULL "
+            "GROUP BY pr.carry_forward_reason ORDER BY n DESC",
+            (chat_id, week_start, week_end),
+        ).fetchall()
+
+    if not rows:
+        return [{"reason": reason, "count": 0} for reason in CARRY_FORWARD_REASONS]
+    return [{"reason": row["reason"], "count": row["n"]} for row in rows]
+
+
+def weekly_common_adjustment(chat_id: str, week_start: Optional[str] = None) -> Optional[str]:
+    """Return this week's most-repeated daily "adjustment for tomorrow", if any repeated.
+
+    A chip suggestion for the weekly review's final step — only offered if
+    the same adjustment came up 2+ times, so a single one-off isn't
+    presented as if it were a pattern.
+
+    Args:
+        chat_id: The owner to look up.
+        week_start: Any ISO date in the target week, defaults to this week.
+
+    Returns:
+        The most-repeated adjustment text, or None if nothing repeated.
+    """
+    week_start = week_start_for(week_start or _today())
+    week_end = _week_end_for(week_start)
+
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT adjustment_for_tomorrow AS adjustment, COUNT(*) AS n FROM daily_plans "
+            "WHERE chat_id = ? AND date >= ? AND date <= ? AND adjustment_for_tomorrow IS NOT NULL "
+            "GROUP BY adjustment_for_tomorrow ORDER BY n DESC LIMIT 1",
+            (chat_id, week_start, week_end),
+        ).fetchone()
+
+    if row and row["n"] >= 2:
+        return row["adjustment"]
+    return None
+
+
+def get_weekly_review_suggestions(chat_id: str, week_start: Optional[str] = None) -> dict:
+    """Bundle every weekly-review wizard pre-fill into one call.
+
+    Args:
+        chat_id: The owner to compute suggestions for.
+        week_start: Any ISO date in the target week, defaults to this week.
+
+    Returns:
+        {
+          "incomplete_items": {"outcomes": [...], "priorities": [...]},
+          "carry_forward_reasons": [{"reason": str, "count": int}, ...],
+          "common_adjustment": str | None,
+        }
+    """
+    week_start = week_start_for(week_start or _today())
+    return {
+        "incomplete_items": weekly_incomplete_items(chat_id, week_start),
+        "carry_forward_reasons": weekly_carry_forward_reasons(chat_id, week_start),
+        "common_adjustment": weekly_common_adjustment(chat_id, week_start),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Development cycle / progress
 # ---------------------------------------------------------------------------
 
@@ -713,15 +1018,65 @@ def get_progress(chat_id: str, cycle_id: Optional[int] = None) -> list[dict]:
 _MENTOR_SUMMARY_SYSTEM = (
     "You are Jarvis's mentorship-prep brain. Given this week's and last week's execution "
     "metrics (punctuality %, priority completion %, carry-forward count, daily review "
-    "consistency %) plus the user's own weekly-review reflections, write a concise mentor "
-    "session summary in exactly this shape:\n\n"
+    "consistency %, average mood energy, most-logged mood, and spending), plus the user's "
+    "own weekly-review reflections, write a concise mentor session summary in exactly this "
+    "shape:\n\n"
     "Since the previous mentorship session:\n"
     "• <metric change bullets, only for metrics that actually changed or are notable>\n\n"
-    "Main pattern noticed:\n<1-2 sentences, grounded in the reflections given, not invented>\n\n"
+    "Main pattern noticed:\n<1-2 sentences, grounded in the data and reflections given, not "
+    "invented — mood or spending only belongs here if it plausibly connects to execution, "
+    "e.g. a mood dip coinciding with a punctuality slip; don't force a connection that isn't "
+    "there>\n\n"
     "Adjustment for next cycle:\n<1 sentence, concrete and actionable>\n\n"
     "If there isn't enough data yet (e.g. no prior week to compare against), say so plainly "
     "instead of inventing numbers or a pattern. Plain text only, no markdown."
 )
+
+
+def _week_mood_and_money(chat_id: str, week_start: str, week_end: str) -> dict:
+    """Return mood/spend context for a specific week — internal helper for
+    generate_mentor_summary(), scoped to week_start/week_end.
+
+    Deliberately NOT habits.weekly_mood_entries()/expenses.weekly_expense_summary()
+    — those are relative to "the last 7 days from right now," which would
+    misrepresent a historical week (e.g. last_week in the mentor summary's
+    week-over-week comparison isn't necessarily the most recent 7 days).
+
+    Returns:
+        {
+          "avg_energy": float | None,     # mean of logged 1-10 energy this week
+          "top_mood": str | None,          # most-logged mood word this week
+          "total_spend": float,            # 0.0 if nothing logged
+          "top_category": str | None,      # highest-spend category this week
+        }
+    """
+    with get_connection() as conn:
+        mood_rows = conn.execute(
+            "SELECT energy, mood FROM mood_log "
+            "WHERE chat_id = ? AND date(created_at) >= ? AND date(created_at) <= ?",
+            (chat_id, week_start, week_end),
+        ).fetchall()
+        expense_rows = conn.execute(
+            "SELECT COALESCE(category, 'Uncategorised') AS category, SUM(amount) AS total FROM expenses "
+            "WHERE chat_id = ? AND date(created_at) >= ? AND date(created_at) <= ? AND amount IS NOT NULL "
+            "GROUP BY category ORDER BY total DESC",
+            (chat_id, week_start, week_end),
+        ).fetchall()
+
+    energies = [row["energy"] for row in mood_rows if row["energy"] is not None]
+    avg_energy = sum(energies) / len(energies) if energies else None
+
+    mood_counts: dict[str, int] = {}
+    for row in mood_rows:
+        mood_counts[row["mood"]] = mood_counts.get(row["mood"], 0) + 1
+    top_mood = max(mood_counts, key=mood_counts.get) if mood_counts else None
+
+    return {
+        "avg_energy": avg_energy,
+        "top_mood": top_mood,
+        "total_spend": sum(row["total"] for row in expense_rows),
+        "top_category": expense_rows[0]["category"] if expense_rows else None,
+    }
 
 
 def generate_mentor_summary(chat_id: str, cycle_id: Optional[int] = None) -> str:
@@ -754,12 +1109,21 @@ def generate_mentor_summary(chat_id: str, cycle_id: Optional[int] = None) -> str
     def _fmt(week, review):
         if week is None:
             return "  (no prior week)"
+        mood_money = _week_mood_and_money(chat_id, week["week_start"], week["week_end"])
         lines = [
             f"  Punctuality: {week['punctuality_pct']:.0f}%" if week["punctuality_pct"] is not None else "  Punctuality: n/a",
             f"  Priority completion: {week['completion_pct']:.0f}%" if week["completion_pct"] is not None else "  Priority completion: n/a",
             f"  Carry-forward: {week['carry_forward_count']}",
             f"  Review consistency: {week['review_consistency_pct']:.0f}%" if week["review_consistency_pct"] is not None else "  Review consistency: n/a",
+            f"  Avg energy: {mood_money['avg_energy']:.1f}/10" if mood_money["avg_energy"] is not None else "  Avg energy: no mood entries logged",
         ]
+        if mood_money["top_mood"]:
+            lines.append(f"  Most logged mood: {mood_money['top_mood']}")
+        if mood_money["total_spend"]:
+            category_note = f" (top category: {mood_money['top_category']})" if mood_money["top_category"] else ""
+            lines.append(f"  Spend: {mood_money['total_spend']:,.2f} BTN{category_note}")
+        else:
+            lines.append("  Spend: none logged")
         if review:
             if review["pattern_observed"]:
                 lines.append(f"  Pattern noted: {review['pattern_observed']}")

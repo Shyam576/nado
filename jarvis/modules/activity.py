@@ -107,6 +107,33 @@ def sample_frontmost(chat_id: str) -> None:
         )
 
 
+def first_sample_time(chat_id: str, date: Optional[str] = None) -> Optional[str]:
+    """Return the earliest activity sample time for a day, as 'HH:MM'.
+
+    A proxy for "when did you actually start working" — used to pre-fill
+    the evening review wizard's actual-start-time step so it isn't always
+    a blank field, without claiming to detect that directly (this is
+    ambient app-focus sampling, not a clock-in system).
+
+    Args:
+        chat_id: The owner to look up.
+        date: ISO date, defaults to today.
+
+    Returns:
+        'HH:MM' (24-hour), or None if nothing was sampled that day.
+    """
+    date = date or datetime.date.today().isoformat()
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT captured_at FROM activity_log WHERE chat_id = ? AND date(captured_at) = ? "
+            "ORDER BY captured_at ASC LIMIT 1",
+            (chat_id, date),
+        ).fetchone()
+    if row is None:
+        return None
+    return datetime.datetime.fromisoformat(row["captured_at"]).strftime("%H:%M")
+
+
 def today_summary(chat_id: str = "", args: Optional[list[str]] = None) -> str:
     """Summarise today's frontmost-app time, aggregated by app.
 

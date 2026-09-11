@@ -67,6 +67,19 @@ def test_weekly_habit_adherence_empty_when_no_habits():
     assert habits.weekly_habit_adherence("owner") == []
 
 
+def test_habit_streaks_combines_streak_and_adherence():
+    today = datetime.date.today()
+    _log_habit_on("owner", "gym", today)
+    _log_habit_on("owner", "gym", today - datetime.timedelta(days=1))
+
+    result = habits.habit_streaks("owner")
+    assert result == [{"habit": "gym", "streak": 2, "days_this_week": 2}]
+
+
+def test_habit_streaks_empty_when_no_habits():
+    assert habits.habit_streaks("owner") == []
+
+
 def test_check_habit_gaps_fires_after_threshold_and_dedupes_same_day():
     gap_start = datetime.date.today() - datetime.timedelta(days=4)
     _log_habit_on("owner", "gym", gap_start)

@@ -1,0 +1,45 @@
+# deploy/jarvis.service — systemd unit for running Jarvis in bot mode on Linux.
+#
+# Linux equivalent of ~/Library/LaunchAgents/com.jarvis.bot.plist (macOS):
+#   RunAtLoad      -> WantedBy=multi-user.target + `systemctl enable`
+#   KeepAlive=true -> Restart=always
+#   ThrottleInterval 30 -> RestartSec=30
+#
+# Install:
+#   sudo cp deploy/jarvis.service /etc/systemd/system/jarvis.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now jarvis
+#
+# Apply code changes (equivalent of `launchctl kickstart -k`):
+#   sudo systemctl restart jarvis
+#
+# Logs (equivalent of ~/Library/Logs/jarvis.log):
+#   journalctl -u jarvis -f
+#
+# Adjust User=, WorkingDirectory=, and the venv path below to match your
+# actual deployment path (this template assumes /opt/jarvis, a dedicated
+# non-root "jarvis" user, and a venv at /opt/jarvis/venv — see the
+# deployment procedure for the exact commands that create these).
+
+[Unit]
+Description=Jarvis bot (Telegram/Discord + dashboard)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jarvis
+WorkingDirectory=/opt/jarvis
+EnvironmentFile=/opt/jarvis/.env
+ExecStart=/opt/jarvis/venv/bin/python -u main.py bot
+Restart=always
+RestartSec=30
+
+# Hardening — the process needs its own working directory and network access,
+# nothing else. Same "least privilege" spirit as the K8s ServiceAccount
+# token's scoped RBAC role documented in config.py.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

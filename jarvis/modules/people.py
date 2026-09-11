@@ -202,6 +202,82 @@ def mark_contacted(chat_id: str = "", args: list[str] | None = None) -> str:
     return f"Marked {person['name']} as contacted today."
 
 
+def _next_birthday_occurrence(today: datetime.date, month: int, day: int) -> datetime.date:
+    """The next date (today or later) matching month/day — Feb 29 falls back to Feb 28 in a non-leap year."""
+    for year in (today.year, today.year + 1):
+        try:
+            candidate = datetime.date(year, month, day)
+        except ValueError:
+            candidate = datetime.date(year, 2, 28)  # only reachable for a Feb 29 birthday
+        if candidate >= today:
+            return candidate
+    return datetime.date(today.year + 1, month, day)  # unreachable in practice
+
+
+def upcoming_birthdays(chat_id: str, within_days: int = 30) -> list[dict]:
+    """Return people whose birthday falls within the next `within_days` days — pure read.
+
+    Unlike check_birthdays() (fires a one-time alert on the exact day, with
+    memory-preference dedup side effects), this is safe to call on every
+    Life-page load — no state is written or consumed.
+
+    Args:
+        chat_id: The chat whose people to check.
+        within_days: How far ahead to look, inclusive (default 30).
+
+    Returns:
+        A list of {"name": str, "birthday": "MM-DD", "days_away": int}
+        dicts, soonest first.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT name, birthday FROM people WHERE chat_id = ? AND birthday IS NOT NULL", (chat_id,)
+        ).fetchall()
+
+    today = datetime.date.today()
+    upcoming = []
+    for row in rows:
+        month, day = (int(x) for x in row["birthday"].split("-"))
+        next_date = _next_birthday_occurrence(today, month, day)
+        days_away = (next_date - today).days
+        if days_away <= within_days:
+            upcoming.append({"name": row["name"], "birthday": row["birthday"], "days_away": days_away})
+
+    upcoming.sort(key=lambda p: p["days_away"])
+    return upcoming
+
+
+def stale_contacts(chat_id: str, min_days: int = FOLLOWUP_GAP_DAYS) -> list[dict]:
+    """Return people not contacted (or never marked) for at least `min_days` — pure read.
+
+    Unlike check_followups() (fires a one-time nudge with memory-preference
+    dedup side effects), this is safe to call on every Life-page load.
+
+    Args:
+        chat_id: The chat whose people to check.
+        min_days: Minimum gap to include, defaults to FOLLOWUP_GAP_DAYS.
+
+    Returns:
+        A list of {"name": str, "days_since_contact": int} dicts, longest gap first.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT name, COALESCE(last_contacted_at, created_at) AS reference_at "
+            "FROM people WHERE chat_id = ?",
+            (chat_id,),
+        ).fetchall()
+
+    today = datetime.date.today()
+    stale = []
+    for row in rows:
+        gap_days = (today - datetime.datetime.fromisoformat(row["reference_at"]).date()).days
+        if gap_days >= min_days:
+            stale.append({"name": row["name"], "days_since_contact": gap_days})
+
+    stale.sort(key=lambda p: -p["days_since_contact"])
+    return stale
+
+
 def check_followups() -> list[tuple[str, str]]:
     """Check every tracked person for a follow-up gap of FOLLOWUP_GAP_DAYS+.
 

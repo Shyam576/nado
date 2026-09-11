@@ -1,0 +1,56 @@
+# Jarvis — minimal server/headless install (bot mode + dashboard, no LLM).
+#
+# Use this instead of requirements.txt when deploying to a server that only
+# runs `python main.py bot` — no microphone, no display, no local LLM. It
+# deliberately excludes:
+#   - llama-cpp-python (local LLM) — everything still works without it: all
+#     slash commands, the whole dashboard, nudges, backups. Only free-form
+#     chat and a handful of LLM-drafted commands (/draft-email, /rewrite,
+#     /notes, /decide, /logs summary, the mentor summary text) degrade to a
+#     plain "try again"/"not available" reply instead of erroring — see
+#     brain.py's ask() and modules/execution.py's generate_mentor_summary().
+#     Add it back (`llama-cpp-python>=0.3.0`) if you later run a model here.
+#   - rich, openai-whisper, scipy, pyaudio — voice_mode's LIVE MIC capture
+#     only (main.py's voice_mode/text_mode paths, and voice.py's listen(),
+#     now import these lazily — bot mode never touches them, so they don't
+#     need to be installed at all on a bot-only server).
+#   - pyautogui, Pillow, pyscreeze — desktop computer-control actions
+#     (open app, screenshot, click). No display on a headless server for
+#     these to act on; also lazily imported, so this is just saving the
+#     install, not required for correctness.
+#
+# Still included below: edge-tts, pyttsx3, numpy, SpeechRecognition — these
+# ARE needed even in bot mode, because bot/telegram_bot.py and
+# bot/discord_bot.py call voice.synthesize_to_file() to send a voice-note
+# reply when you send Jarvis a voice message (incoming transcription itself
+# uses modules/transcription.py's own lazy Whisper loader, not voice.py's).
+# None of these four need a native library — no apt-get beyond tesseract.
+#
+# Install with: python3 -m pip install -r requirements-server.txt
+
+python-telegram-bot[job-queue]>=21.0
+discord.py>=2.3.0
+pytesseract>=0.3.10     # OCR for payment-screenshot expense tracking (requires `apt install tesseract-ocr`)
+python-dotenv>=1.0.0    # loads TELEGRAM_BOT_TOKEN / JARVIS_ALLOWED_CHAT_IDS from .env
+psutil>=7.0.0           # /system stats: CPU, RAM, disk, uptime
+
+# Voice-note replies (bot/telegram_bot.py, bot/discord_bot.py -> voice.synthesize_to_file)
+# rich: voice.py imports ui.py at module level for its (voice_mode-only) state
+# display; pure-Python, no native deps, so it's simplest to just include it
+# here rather than chase that import lazy too — unlike pyaudio/whisper below,
+# it costs nothing on a server.
+rich>=13.0.0
+edge-tts>=7.0.0
+pyttsx3>=2.90            # fallback TTS if edge-tts is unreachable (needs `apt install espeak-ng` to actually speak, not just import)
+numpy>=1.24.0
+SpeechRecognition>=3.10.4
+
+# Incoming voice-note transcription (modules/transcription.py's own lazy Whisper loader)
+openai-whisper>=20231117
+scipy>=1.11.0
+
+# Web dashboard
+fastapi>=0.115.0
+uvicorn>=0.30.0
+python-multipart>=0.0.9
+itsdangerous>=2.2.0

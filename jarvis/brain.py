@@ -135,6 +135,14 @@ def ask(user_input: str) -> str:
             top_k=50,
         )
         reply: str = response["choices"][0]["message"]["content"]
+    except FileNotFoundError:
+        # No model file configured at all (see _find_gguf) — this is a
+        # standing condition, not a one-off glitch, so "try again" would be
+        # misleading. Expected on a deployment that deliberately runs
+        # without a local LLM (e.g. a low-RAM server) — every slash command
+        # still works via bot/commands.py; only free-form chat is affected.
+        logger.warning("No local model configured — chat falls back to a plain reply.")
+        reply = "I don't have a language model running right now, so I can't chat freely — try a /command instead (see /help)."
     except Exception as exc:  # noqa: BLE001
         logger.exception("LLM call failed: %s", exc)
         reply = "Something went wrong on my end. Do give me a moment and try again."

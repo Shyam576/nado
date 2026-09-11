@@ -11,6 +11,7 @@ import datetime
 import logging
 import subprocess
 import sys
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +68,41 @@ def _format_time(hhmm: str) -> str:
     return datetime.datetime.strptime(hhmm, "%H:%M").strftime("%-I:%M %p")
 
 
+def get_today_events() -> Optional[list[dict]]:
+    """Return today's Calendar.app events, sorted by start time — structured.
+
+    The dashboard's Today-page context panel and today_events() (the bot's
+    text-formatting wrapper) both call this; the AppleScript run + parse
+    logic lives here exactly once.
+
+    Returns:
+        A list of {"time": "HH:MM", "summary": str} dicts (empty list if
+        there are none today), or None if the calendar couldn't be read at
+        all (wrong platform, AppleScript/permission failure) — distinct from
+        "read fine, nothing on it."
+    """
+    if sys.platform != "darwin":
+        return None
+
+    try:
+        raw = _run_applescript(_TODAY_EVENTS_SCRIPT)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Calendar AppleScript failed: %s", exc)
+        return None
+
+    events: list[dict] = []
+    for line in raw.strip().splitlines():
+        if "||" not in line:
+            continue
+        hhmm, summary = line.split("||", 1)
+        events.append({"time": hhmm.strip(), "summary": summary.strip() or "(untitled event)"})
+
+    events.sort(key=lambda e: e["time"])
+    return events
+
+
 def today_events(chat_id: str = "", args: list[str] | None = None) -> str:
-    """Return today's Calendar.app events, sorted by start time.
+    """Return today's Calendar.app events, sorted by start time, as chat text.
 
     Args:
         chat_id: Unused — the calendar is machine-global.
@@ -79,30 +113,19 @@ def today_events(chat_id: str = "", args: list[str] | None = None) -> str:
         or an error string if Calendar.app couldn't be reached (e.g.
         missing Automation permission the first time this runs).
     """
-    if sys.platform != "darwin":
-        return "Calendar is only wired up for macOS right now."
-
-    try:
-        raw = _run_applescript(_TODAY_EVENTS_SCRIPT)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Calendar AppleScript failed: %s", exc)
+    events = get_today_events()
+    if events is None:
+        if sys.platform != "darwin":
+            return "Calendar is only wired up for macOS right now."
         return (
             "Couldn't read Calendar.app — if this is the first time, macOS may need "
             "Automation permission granted under System Settings > Privacy & Security > Automation."
         )
 
-    events: list[tuple[str, str]] = []
-    for line in raw.strip().splitlines():
-        if "||" not in line:
-            continue
-        hhmm, summary = line.split("||", 1)
-        events.append((hhmm.strip(), summary.strip() or "(untitled event)"))
-
     if not events:
         return "No events on your calendar today."
 
-    events.sort(key=lambda pair: pair[0])
     lines = ["Today's events:"]
-    for hhmm, summary in events:
-        lines.append(f"  {_format_time(hhmm)} — {summary}")
+    for event in events:
+        lines.append(f"  {_format_time(event['time'])} — {event['summary']}")
     return "\n".join(lines)

@@ -542,6 +542,52 @@ def weekly_expense_summary(chat_id: str) -> dict:
     return {"total": sum(by_category.values()), "by_category": by_category}
 
 
+def get_budget_summary(chat_id: str) -> dict:
+    """Return this calendar month's spend, budget, and category breakdown — structured.
+
+    budget_status() (the bot's text wrapper) and the dashboard's /api/money
+    both call this; the month-to-date SQL lives here exactly once.
+
+    Args:
+        chat_id: The owner to total expenses for.
+
+    Returns:
+        {
+          "total": float, "count": int,
+          "budget": float | None, "remaining": float | None,  # remaining is negative when over budget
+          "pct_used": float | None,
+          "by_category": [{"category": str, "total": float}, ...],  # highest spend first
+        }
+    """
+    month_start = datetime.date.today().replace(day=1).isoformat()
+
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS n FROM expenses "
+            "WHERE chat_id = ? AND date(created_at) >= ? AND amount IS NOT NULL",
+            (chat_id, month_start),
+        ).fetchone()
+        category_rows = conn.execute(
+            "SELECT COALESCE(category, 'Uncategorised') AS category, SUM(amount) AS total "
+            "FROM expenses WHERE chat_id = ? AND date(created_at) >= ? AND amount IS NOT NULL "
+            "GROUP BY category ORDER BY total DESC",
+            (chat_id, month_start),
+        ).fetchall()
+
+    total = row["total"]
+    budget_pref = memory.get_preference("monthly_budget")
+    budget = float(budget_pref) if budget_pref else None
+
+    return {
+        "total": total,
+        "count": row["n"],
+        "budget": budget,
+        "remaining": (budget - total) if budget is not None else None,
+        "pct_used": (100.0 * total / budget) if budget else None,
+        "by_category": [{"category": r["category"], "total": r["total"]} for r in category_rows],
+    }
+
+
 def budget_status(chat_id: str = "", args: Optional[list[str]] = None) -> str:
     """Report this calendar month's spend against the configured budget.
 
@@ -552,37 +598,22 @@ def budget_status(chat_id: str = "", args: Optional[list[str]] = None) -> str:
     Returns:
         Spend total, and remaining/over-budget amount if a budget is set.
     """
-    month_start = datetime.date.today().replace(day=1).isoformat()
-
-    with get_connection() as conn:
-        row = conn.execute(
-            "SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS n FROM expenses "
-            "WHERE chat_id = ? AND date(created_at) >= ? AND amount IS NOT NULL",
-            (chat_id, month_start),
-        ).fetchone()
-
-    total, count = row["total"], row["n"]
+    summary = get_budget_summary(chat_id)
     month_name = datetime.date.today().strftime("%B")
-    lines = [f"{month_name}: {total:,.2f} BTN spent across {count} expense{'s' if count != 1 else ''}."]
+    lines = [
+        f"{month_name}: {summary['total']:,.2f} BTN spent across "
+        f"{summary['count']} expense{'s' if summary['count'] != 1 else ''}."
+    ]
 
-    budget = memory.get_preference("monthly_budget")
-    if budget:
-        remaining = float(budget) - total
-        if remaining >= 0:
-            lines.append(f"Budget: {float(budget):,.2f} BTN — {remaining:,.2f} remaining.")
+    if summary["budget"] is not None:
+        if summary["remaining"] >= 0:
+            lines.append(f"Budget: {summary['budget']:,.2f} BTN — {summary['remaining']:,.2f} remaining.")
         else:
-            lines.append(f"Budget: {float(budget):,.2f} BTN — over by {-remaining:,.2f}.")
+            lines.append(f"Budget: {summary['budget']:,.2f} BTN — over by {-summary['remaining']:,.2f}.")
 
-    if count:
-        with get_connection() as conn:
-            category_rows = conn.execute(
-                "SELECT COALESCE(category, 'Uncategorised') AS category, SUM(amount) AS total "
-                "FROM expenses WHERE chat_id = ? AND date(created_at) >= ? AND amount IS NOT NULL "
-                "GROUP BY category ORDER BY total DESC",
-                (chat_id, month_start),
-            ).fetchall()
+    if summary["count"]:
         lines.append("")
         lines.append("By category:")
-        lines.extend(f"  {row['category']}: {row['total']:,.2f}" for row in category_rows)
+        lines.extend(f"  {c['category']}: {c['total']:,.2f}" for c in summary["by_category"])
 
     return "\n".join(lines)

@@ -1,11 +1,13 @@
 """
 api/routes.py — JSON API for the web dashboard.
 
-Thin HTTP wrapper around modules/execution.py — every handler here does
-request validation (via api/models.py) and response shaping, nothing else.
-No business logic lives in this file; it belongs in modules/execution.py so
-the bot transports (bot/commands.py, modules/intent.py) and the dashboard
-call the exact same functions against the exact same tables. See
+Thin HTTP wrapper around the modules/*.py business-logic layer (mainly
+execution.py, plus devops/expenses/finance/tasks/calendar_app for the
+read-only Life page and header strip) — every handler here does request
+validation (via api/models.py) and response shaping, nothing else. No
+business logic lives in this file; it belongs in the modules so the bot
+transports (bot/commands.py, modules/intent.py) and the dashboard call the
+exact same functions against the exact same tables. See
 modules/execution.py's module docstring.
 
 All routes are scoped to config.OWNER_ID, same as the bot transports — the
@@ -24,27 +26,54 @@ from api.models import (
     CycleOut,
     DailyPlanOut,
     EveningReviewIn,
+    HeaderOut,
     MentorshipContextIn,
     MentorshipContextOut,
     MentorSummaryOut,
+    MoneyOut,
+    MoodOut,
     MorningPlanIn,
     OutcomeStatusIn,
+    PeopleGlanceOut,
     PriorityEditIn,
     PriorityIn,
     PriorityOut,
     ProgressOut,
     ReorderIn,
+    ReviewSuggestionsOut,
+    SystemOut,
+    TodayContextOut,
     TodayOut,
-    WeekOut,
     WeeklyOutcomeIn,
     WeeklyOutcomeOut,
     WeeklyReviewIn,
     WeeklyReviewOut,
+    WeeklyReviewSuggestionsOut,
+    WeekOut,
 )
 from config import OWNER_ID
-from modules import execution
+from modules import calendar_app, devops, execution, expenses, finance, habits, people, tasks
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_session)])
+
+
+# ---------------------------------------------------------------------------
+# Header strip — loaded on every page, kept to one round-trip
+# ---------------------------------------------------------------------------
+
+
+@router.get("/header", response_model=HeaderOut)
+def get_header():
+    plan = execution.get_or_create_daily_plan(OWNER_ID)
+    next_reminder = tasks.get_next_reminder(OWNER_ID)
+    k8s = devops.k8s_health_summary()
+    return {
+        "date": plan["date"],
+        "must_not_slip": plan["must_not_slip"],
+        "next_reminder": next_reminder,
+        "k8s_healthy": k8s["healthy"],
+        "k8s_unhealthy_count": k8s["unhealthy_count"],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +152,26 @@ def submit_evening_review(body: EveningReviewIn):
     )
 
 
+@router.get("/today/context", response_model=TodayContextOut)
+def get_today_context():
+    """Read-only context so the morning plan doesn't need a Discord round-trip:
+    pending tasks and today's calendar. No write path here — task completion
+    and calendar entries are still owned by chat/voice, not this dashboard."""
+    return {
+        "pending_tasks": tasks.pending_tasks(OWNER_ID),
+        "calendar_events": calendar_app.get_today_events(),
+    }
+
+
+@router.get("/today/review-suggestions", response_model=ReviewSuggestionsOut)
+def get_review_suggestions(date: Optional[str] = None):
+    """Pre-fills for the evening review wizard — every field here is a
+    suggestion the wizard shows as editable/overridable, never auto-applied."""
+    suggestions = execution.get_review_suggestions(OWNER_ID, date)
+    suggestions["carry_forward_reasons"] = execution.CARRY_FORWARD_REASONS
+    return suggestions
+
+
 # ---------------------------------------------------------------------------
 # Week
 # ---------------------------------------------------------------------------
@@ -170,6 +219,13 @@ def submit_weekly_review(body: WeeklyReviewIn):
     )
 
 
+@router.get("/week/review-suggestions", response_model=WeeklyReviewSuggestionsOut)
+def get_weekly_review_suggestions(week_start: Optional[str] = None):
+    """Pre-fills for the weekly review wizard — chips seeded from what
+    actually happened this week, all editable/overridable, never auto-applied."""
+    return execution.get_weekly_review_suggestions(OWNER_ID, week_start)
+
+
 # ---------------------------------------------------------------------------
 # Development cycle / progress / mentorship
 # ---------------------------------------------------------------------------
@@ -205,3 +261,47 @@ def get_mentorship_context():
 @router.post("/mentorship-context", response_model=MentorshipContextOut)
 def set_mentorship_context(body: MentorshipContextIn):
     return execution.set_mentorship_context(OWNER_ID, **body.model_dump())
+
+
+# ---------------------------------------------------------------------------
+# Life page — read-only glance widgets. No write paths here: money, mood,
+# people, and system are all owned by chat/voice input already; this page
+# only visualizes what's already in the database.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/money", response_model=MoneyOut)
+def get_money():
+    budget = expenses.get_budget_summary(OWNER_ID)
+    ticker = finance.get_price_ticker()
+    return {
+        "month_total": budget["total"],
+        "month_count": budget["count"],
+        "budget": budget["budget"],
+        "remaining": budget["remaining"],
+        "pct_used": budget["pct_used"],
+        "by_category": budget["by_category"],
+        "gold": ticker["gold"],
+        "ter": ticker["ter"],
+    }
+
+
+@router.get("/system", response_model=SystemOut)
+def get_system(namespace: Optional[str] = None):
+    return devops.k8s_health_summary(namespace)
+
+
+@router.get("/mood", response_model=MoodOut)
+def get_mood():
+    return {
+        "week_trend": habits.weekly_mood_entries(OWNER_ID),
+        "habits": habits.habit_streaks(OWNER_ID),
+    }
+
+
+@router.get("/people", response_model=PeopleGlanceOut)
+def get_people_glance():
+    return {
+        "upcoming_birthdays": people.upcoming_birthdays(OWNER_ID),
+        "no_contact": people.stale_contacts(OWNER_ID),
+    }

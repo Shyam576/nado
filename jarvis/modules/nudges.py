@@ -17,7 +17,7 @@ import datetime
 import logging
 
 import memory
-from modules import tasks
+from modules import execution, tasks
 from store.db import get_connection
 
 logger = logging.getLogger(__name__)
@@ -99,6 +99,46 @@ def evening_expense_nudge(chat_id: str) -> str | None:
     if count > 0:
         return None
     return "No expenses logged today — nothing spent, or just forgot? A quick “spent 100 on …” keeps the budget honest."
+
+
+def evening_review_nudge(chat_id: str) -> str | None:
+    """Return a nudge if today's evening review hasn't been done yet.
+
+    Intended to run once in the evening via a daily job — same shape as
+    evening_expense_nudge() above. No dashboard link (it's not reachable
+    from a phone by default — see config.py's DASHBOARD_HOST) — replying
+    "review my day" here works identically to opening the dashboard, so the
+    nudge just points at whichever is at hand.
+
+    Args:
+        chat_id: The owner whose plan is checked.
+
+    Returns:
+        The nudge message, or None if today's review is already done.
+    """
+    plan = execution.get_or_create_daily_plan(chat_id)
+    if plan["review_completed"]:
+        return None
+    return 'Time for your evening review — open the dashboard, or just reply "review my day" here.'
+
+
+def no_priorities_nudge(chat_id: str) -> str | None:
+    """Return a nudge if no priorities have been set for today yet.
+
+    Intended to run once in the morning via a daily job.
+
+    Args:
+        chat_id: The owner whose plan is checked.
+
+    Returns:
+        The nudge message, or None if at least one priority is already set today.
+    """
+    if execution.get_priorities(chat_id):
+        return None
+    return (
+        'Nothing planned for today yet — tell me your top priorities, e.g. '
+        '"my top priorities today are: 1. ... 2. ...", or open the dashboard.'
+    )
 
 
 def related_task_note(chat_id: str, keyword: str) -> str:

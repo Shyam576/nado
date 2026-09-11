@@ -306,6 +306,52 @@ def price_change_summary() -> str:
     return "\n".join(lines) if lines else "Price data unavailable."
 
 
+def get_price_ticker() -> dict:
+    """Return live gold + TER prices with 24h change where available — structured.
+
+    record_price_snapshots() only tracks GOLD_USD and TER_BTN, so 24h change
+    is only computable for gold and TER/BTN — TER/USD and TER/INR report
+    price only (change_24h_pct: None), since no snapshot history exists for
+    them. Used by the dashboard's /api/money; gold_price()/ter_price() (the
+    bot's text commands) are unchanged and don't call this.
+
+    Returns:
+        {
+          "gold": {"price": float, "change_24h_pct": float | None} | None,
+          "ter": {
+            "usd": {"ask": float, "bid": float, "change_24h_pct": None} | None,
+            "inr": {"ask": float, "bid": float, "change_24h_pct": None} | None,
+            "btn": {"ask": float, "bid": float, "change_24h_pct": float | None} | None,
+          }
+        }
+        A currency/gold entry is None only if the live fetch failed entirely.
+    """
+    result: dict = {"gold": None, "ter": {"usd": None, "inr": None, "btn": None}}
+
+    gold = _fetch_gold_price()
+    if gold is not None:
+        baseline = _baseline_price("GOLD_USD")
+        change = (100.0 * (gold["price"] - baseline) / baseline) if baseline else None
+        result["gold"] = {"price": gold["price"], "change_24h_pct": change}
+
+    prices = _fetch_ter_prices()
+    if prices is not None:
+        for currency, symbol in _TER_SYMBOLS.items():
+            entry = prices.get(symbol)
+            if entry is None:
+                continue
+            ask = entry["ask_price"] / _TER_PRICE_SCALE
+            bid = entry["bid_price"] / _TER_PRICE_SCALE
+            change = None
+            if currency == "BTN":
+                baseline = _baseline_price("TER_BTN")
+                if baseline:
+                    change = 100.0 * (ask - baseline) / baseline
+            result["ter"][currency.lower()] = {"ask": ask, "bid": bid, "change_24h_pct": change}
+
+    return result
+
+
 def _change_line(label: str, current: float, baseline: Optional[float], currency_prefix: str) -> str:
     """Format one price-change line, or just the current price if no baseline exists."""
     if baseline is None or baseline == 0:

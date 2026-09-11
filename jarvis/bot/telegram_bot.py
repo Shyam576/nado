@@ -49,6 +49,8 @@ STALE_TASK_HOUR = 10  # mid-morning, when acting on a task nudge is most likely
 K8S_HEALTH_POLL_SECONDS = 900  # 15 minutes — devops issues deserve faster detection than daily checks
 ACTIVITY_SAMPLE_POLL_SECONDS = activity.SAMPLE_INTERVAL_MINUTES * 60
 PEOPLE_CHECK_POLL_SECONDS = 21600  # 6 hours — same daily-cadence reasoning as habit gaps
+EVENING_REVIEW_NUDGE_HOUR = 20  # 8 PM — ahead of EVENING_NUDGE_HOUR (expenses) so they don't land together
+NO_PRIORITIES_NUDGE_HOUR = 10  # mid-morning — same reasoning as STALE_TASK_HOUR
 
 
 async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -316,6 +318,26 @@ async def _send_stale_task_nudge(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.exception("Stale task nudge failed: %s", exc)
 
 
+async def _send_evening_review_nudge(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job-queue callback: nudge once in the evening if today's review isn't done."""
+    try:
+        nudge = nudges.evening_review_nudge(OWNER_ID)
+        if nudge:
+            await notifier.broadcast(nudge)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Evening review nudge failed: %s", exc)
+
+
+async def _send_no_priorities_nudge(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job-queue callback: nudge once in the morning if no priorities are set yet."""
+    try:
+        nudge = nudges.no_priorities_nudge(OWNER_ID)
+        if nudge:
+            await notifier.broadcast(nudge)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("No-priorities nudge failed: %s", exc)
+
+
 async def _send_daily_digest(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Job-queue callback: broadcast the daily digest."""
     try:
@@ -381,6 +403,14 @@ def build_application() -> Application:
     application.job_queue.run_daily(
         _send_stale_task_nudge,
         time=datetime.time(hour=STALE_TASK_HOUR, minute=0, tzinfo=local_tz),
+    )
+    application.job_queue.run_daily(
+        _send_evening_review_nudge,
+        time=datetime.time(hour=EVENING_REVIEW_NUDGE_HOUR, minute=0, tzinfo=local_tz),
+    )
+    application.job_queue.run_daily(
+        _send_no_priorities_nudge,
+        time=datetime.time(hour=NO_PRIORITIES_NUDGE_HOUR, minute=30, tzinfo=local_tz),
     )
     return application
 
