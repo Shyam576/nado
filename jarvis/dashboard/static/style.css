@@ -12,22 +12,39 @@
     --danger-weak: #241a1a;
   }
 }
-* { box-sizing: border-box; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 15px;
+  overscroll-behavior-y: contain; /* no rubber-band flash of the page background past the edges */
 }
-nav {
-  display: flex; gap: 1.5rem; align-items: center; padding: 1rem 1.5rem;
+
+/* --- Top bar: brand + sign out only. Primary nav lives in the bottom tab bar. --- */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: calc(env(safe-area-inset-top, 0px) + .75rem) 1.5rem .75rem;
   border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg); z-index: 10;
 }
-nav .brand { font-weight: 600; margin-right: auto; }
-nav a, nav span.disabled { color: var(--muted); text-decoration: none; font-size: .9rem; }
-nav span.disabled { opacity: .45; cursor: default; }
-nav a.active { color: var(--text); font-weight: 500; }
-nav a:hover { color: var(--text); }
-main { max-width: 780px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+.topbar .brand { font-weight: 600; }
+
+main { max-width: 780px; margin: 0 auto; padding: 1.5rem 1.5rem calc(5.25rem + env(safe-area-inset-bottom, 0px)); }
+
+/* --- Bottom tab bar: thumb-reachable primary navigation, native-app pattern --- */
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+  display: flex; background: var(--card); border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.tab {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: .2rem; padding: .5rem 0 .35rem; text-decoration: none; color: var(--muted);
+  font-size: .66rem; min-height: 52px; touch-action: manipulation;
+}
+.tab svg { width: 22px; height: 22px; flex-shrink: 0; }
+.tab.active { color: var(--accent); }
+.tab:active { opacity: .6; }
 h1 { font-size: 1.3rem; font-weight: 600; margin: 0 0 .1rem; }
 .date-sub { color: var(--muted); font-size: .9rem; margin: 0 0 1.75rem; }
 .card {

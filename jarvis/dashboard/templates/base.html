@@ -2,20 +2,22 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
   <title>{% block title %}Jarvis{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="manifest" href="/static/manifest.json">
+  <link rel="apple-touch-icon" href="/static/icons/icon-180.png">
+  <meta name="theme-color" content="#0f1115">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Jarvis">
 </head>
 <body>
-  <nav>
+  <header class="topbar">
     <span class="brand">Jarvis</span>
-    <a href="/" class="{{ 'active' if active_page == 'today' else '' }}">Today</a>
-    <a href="/week" class="{{ 'active' if active_page == 'week' else '' }}">Week</a>
-    <a href="/progress" class="{{ 'active' if active_page == 'progress' else '' }}">Progress</a>
-    <a href="/life" class="{{ 'active' if active_page == 'life' else '' }}">Life</a>
-    <a href="/mentorship" class="{{ 'active' if active_page == 'mentorship' else '' }}">Mentorship</a>
     <form method="post" action="/logout"><button type="submit" class="ghost">Sign out</button></form>
-  </nav>
+  </header>
   <div id="header-strip" class="header-strip">
     <span id="header-date" class="header-item muted">&nbsp;</span>
     <span id="header-must-not-slip" class="header-item header-must-not-slip" style="display:none"></span>
@@ -27,6 +29,30 @@
   <main>
     {% block content %}{% endblock %}
   </main>
+
+  <nav class="tabbar">
+    <a href="/" class="tab {{ 'active' if active_page == 'today' else '' }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>
+      <span>Today</span>
+    </a>
+    <a href="/week" class="tab {{ 'active' if active_page == 'week' else '' }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
+      <span>Week</span>
+    </a>
+    <a href="/progress" class="tab {{ 'active' if active_page == 'progress' else '' }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18l5-6 4 3 6-8"/><path d="M15 6h5v5"/></svg>
+      <span>Progress</span>
+    </a>
+    <a href="/life" class="tab {{ 'active' if active_page == 'life' else '' }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7-4.5-9.5-9C1 7.5 3 4 6.5 4c2 0 3.5 1.2 4.5 2.5C12 5.2 13.5 4 15.5 4 19 4 21 7.5 20.5 11c-1.5 4.5-8.5 9-8.5 9z"/></svg>
+      <span>Life</span>
+    </a>
+    <a href="/mentorship" class="tab {{ 'active' if active_page == 'mentorship' else '' }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5 8.6 8.6 0 0 1-3.4-.7L3 21l1.8-5.4A8.5 8.5 0 1 1 21 11.5z"/></svg>
+      <span>Mentor</span>
+    </a>
+  </nav>
+
   <script src="/static/header.js"></script>
   {% block scripts %}{% endblock %}
 </body>
