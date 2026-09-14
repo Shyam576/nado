@@ -268,6 +268,19 @@ PROACTIVE_POLL_SECONDS: int = 30
 
 
 # ---------------------------------------------------------------------------
+# Timezone (bot daily job scheduling: digest, nudges)
+# ---------------------------------------------------------------------------
+
+# Explicit IANA zone for the Telegram bot's run_daily jobs (morning digest,
+# evening nudges). Deliberately NOT derived from datetime.now().astimezone()
+# — under the LaunchAgent (see PATH note in com.jarvis.bot.plist) that has
+# been observed to resolve to UTC rather than the host's local zone, which
+# silently shifted every "local" hour by Bhutan's fixed +6:00 offset (e.g.
+# an 8 PM nudge landing at 2 AM). Override via env var if the bot ever runs
+# somewhere other than Bhutan.
+TIMEZONE: str = os.environ.get("JARVIS_TIMEZONE", "Asia/Thimphu")
+
+# ---------------------------------------------------------------------------
 # Multi-platform identity
 # ---------------------------------------------------------------------------
 

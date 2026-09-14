@@ -23,6 +23,7 @@ import logging
 import os
 import tempfile
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from telegram import Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
@@ -31,7 +32,7 @@ import voice
 from bot import notifier
 from bot.commands import dispatch
 from brain import ask
-from config import OWNER_ID, TELEGRAM_ALLOWED_CHAT_IDS, TELEGRAM_BOT_TOKEN
+from config import OWNER_ID, TELEGRAM_ALLOWED_CHAT_IDS, TELEGRAM_BOT_TOKEN, TIMEZONE
 from modules import activity, devops, digest, email_watcher, expenses, finance, habits, intent, nudges, people, tasks, transcription
 
 logger = logging.getLogger(__name__)
@@ -113,7 +114,13 @@ async def _handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         with tempfile.TemporaryDirectory() as tmp_dir:
             local_path = Path(tmp_dir) / "receipt.jpg"
             await telegram_file.download_to_drive(custom_path=str(local_path))
-            reply = expenses.add_expense_from_image(OWNER_ID, str(local_path), caption=message.caption)
+            # OCR + two local-LLM calls take several seconds of pure CPU work —
+            # run off the event loop so it doesn't stall Telegram polling and
+            # Discord's gateway heartbeat, which share this same loop (see
+            # main.py's _run_bot_transports()).
+            reply = await asyncio.to_thread(
+                expenses.add_expense_from_image, OWNER_ID, str(local_path), caption=message.caption
+            )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error handling photo: %s", exc)
         reply = "Something went wrong processing that image. Give me a moment and try again."
@@ -388,7 +395,7 @@ def build_application() -> Application:
     application.job_queue.run_repeating(
         _check_budget_pacing, interval=BUDGET_PACING_POLL_SECONDS, first=BUDGET_PACING_POLL_SECONDS
     )
-    local_tz = datetime.datetime.now().astimezone().tzinfo
+    local_tz = ZoneInfo(TIMEZONE)
     application.job_queue.run_daily(
         _send_daily_digest, time=datetime.time(hour=DAILY_DIGEST_HOUR, minute=0, tzinfo=local_tz)
     )

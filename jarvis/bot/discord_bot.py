@@ -90,7 +90,13 @@ async def _handle_receipt_image(message: discord.Message, attachment: discord.At
             local_path = Path(tmp_dir) / attachment.filename
             await attachment.save(local_path)
             caption = message.content.strip() or None
-            reply = expenses.add_expense_from_image(OWNER_ID, str(local_path), caption=caption)
+            # OCR + two local-LLM calls take several seconds of pure CPU work —
+            # run off the event loop so it doesn't stall Discord's gateway
+            # heartbeat and Telegram polling, which share this same loop (see
+            # main.py's _run_bot_transports()).
+            reply = await asyncio.to_thread(
+                expenses.add_expense_from_image, OWNER_ID, str(local_path), caption=caption
+            )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Error handling Discord image: %s", exc)
         reply = "Something went wrong processing that image. Give me a moment and try again."
