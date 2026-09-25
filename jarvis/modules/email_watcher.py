@@ -27,6 +27,16 @@ _MAX_ALERTS_PER_POLL = 10  # guards against flooding chat with a huge backlog on
 _MAX_BODY_PREVIEW_CHARS = 1200  # keeps sender+subject+body comfortably under Discord's 2000-char limit
 _MAX_ALERT_CHARS = 1900
 
+# imaplib.IMAP4_SSL has no timeout by default — a stalled connection/read
+# (network blip, mail server hang) blocks forever. Production hit this
+# repeatedly: the socket read inside login()/uid() hung past 120s, freezing
+# the whole shared event loop (this is polled from an async job — see
+# bot/telegram_bot.py's _check_new_emails) until watchdog.py's last-resort
+# timer force-killed the process. A bounded timeout turns an indefinite hang
+# into a normal, already-handled poll failure (caught below, logged, retried
+# next interval) instead of taking the whole bot down with it.
+_IMAP_TIMEOUT_SECONDS = 15
+
 
 def _decode_header_value(raw: str | None) -> str:
     """Decode a MIME-encoded header (e.g. '=?UTF-8?B?...?=') into plain text."""
@@ -97,7 +107,7 @@ def check_new_emails() -> list[str]:
 
     conn = None
     try:
-        conn = imaplib.IMAP4_SSL(EMAIL_IMAP_HOST, EMAIL_IMAP_PORT)
+        conn = imaplib.IMAP4_SSL(EMAIL_IMAP_HOST, EMAIL_IMAP_PORT, timeout=_IMAP_TIMEOUT_SECONDS)
         conn.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
         typ, _ = conn.select(EMAIL_FOLDER, readonly=True)
         if typ != "OK":

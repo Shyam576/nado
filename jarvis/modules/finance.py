@@ -138,7 +138,12 @@ def ter_price(chat_id: str = "", args: Optional[list[str]] = None) -> str:
 
     prices = _fetch_ter_prices()
     if prices is None:
-        return "Couldn't reach the TER price service — try again shortly."
+        return (
+            "Couldn't reach the TER price service — api.ter.bt is returning 403 Forbidden from "
+            "this server's IP, not a transient outage (confirmed: it works from a Bhutan-based "
+            "connection, blocked from the DigitalOcean droplet). Retrying won't fix this on its "
+            "own; it needs a network-level workaround."
+        )
 
     if currency == "ALL":
         lines = [_format_ter_line(sym, cur, prices) for cur, sym in _TER_SYMBOLS.items()]

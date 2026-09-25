@@ -261,8 +261,15 @@ async def _check_k8s_health(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def _check_new_emails(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Job-queue callback: broadcast any new emails since the last poll."""
-    for alert in email_watcher.check_new_emails():
+    """Job-queue callback: broadcast any new emails since the last poll.
+
+    IMAP is blocking I/O (even with the timeout in email_watcher.py, up to
+    _IMAP_TIMEOUT_SECONDS of it) — run off the event loop so a slow mail
+    server poll doesn't stall Telegram polling and Discord's gateway
+    heartbeat, which share this same loop (see main.py's _run_bot_transports()
+    and the OCR fix in bot/telegram_bot.py._handle_photo for the same pattern).
+    """
+    for alert in await asyncio.to_thread(email_watcher.check_new_emails):
         await notifier.broadcast(alert)
 
 
