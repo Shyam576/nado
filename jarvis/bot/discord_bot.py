@@ -131,7 +131,7 @@ async def _handle_voice_attachment(
             return
 
         image_path = None
-        reply = dispatch(OWNER_ID, transcript)
+        reply = dispatch(OWNER_ID, transcript, source="discord", source_message_id=str(message.id))
         if reply is None:
             routed = intent.route(OWNER_ID, transcript, allow_execution=not is_replay)
             if routed is not None:
@@ -239,7 +239,7 @@ async def _process_message(message: discord.Message, client_user, is_replay: boo
 
     image_path = None
     try:
-        reply = dispatch(OWNER_ID, text)
+        reply = dispatch(OWNER_ID, text, source="discord", source_message_id=str(message.id))
         if reply is None:
             routed = intent.route(OWNER_ID, text, allow_execution=not is_replay)
             if routed is not None:

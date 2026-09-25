@@ -71,7 +71,7 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     image_path = None
     try:
-        reply = dispatch(OWNER_ID, text)
+        reply = dispatch(OWNER_ID, text, source="telegram", source_message_id=str(message.message_id))
         if reply is None:
             routed = intent.route(OWNER_ID, text)
             if routed is not None:
@@ -161,7 +161,7 @@ async def _handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             return
 
         image_path = None
-        reply = dispatch(OWNER_ID, transcript)
+        reply = dispatch(OWNER_ID, transcript, source="telegram", source_message_id=str(message.message_id))
         if reply is None:
             routed = intent.route(OWNER_ID, transcript)
             if routed is not None:

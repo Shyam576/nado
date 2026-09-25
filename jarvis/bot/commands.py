@@ -6,11 +6,12 @@ no LLM round-trip, per JARVIS_V2_PLAN.md §6. Anything not in COMMANDS falls
 through to the LLM chat path in bot/telegram_bot.py.
 """
 
-from typing import Callable
+from typing import Callable, Optional
 
 from modules import (
     activity,
     calendar_app,
+    captures,
     communication,
     decision,
     devops,
@@ -185,6 +186,11 @@ HELP_TEXT: dict[str, str] = {
     "/categories": "/categories — list all expense categories",
     "/check-email": "/check-email — manually poll for new emails (also runs automatically every 2 minutes)",
     "/recall": "/recall <keyword> — search past tasks/expenses/mood/habits for a keyword",
+    "/capture": (
+        "/capture <text> — save and classify a quick thought (task/idea/work_issue/learning/"
+        "reminder/personal_thought/note) | list [status] | correct <id> <type> | done <id> | "
+        "archive <id> | schedule <id> <YYYY-MM-DD>"
+    ),
     "/plan": "/plan — show today's execution plan (or just tell me your priorities in plain language)",
     "/review": "/review — show today's status and start the evening review (or just tell me how it went)",
     "/weekstatus": "/weekstatus — this week's execution scorecard (punctuality, completion, carry-forward)",
@@ -241,12 +247,19 @@ COMMANDS: dict[str, Callable[[str, list[str]], str]] = {
 }
 
 
-def dispatch(chat_id: str, text: str) -> str | None:
+def dispatch(
+    chat_id: str, text: str, source: str = "unknown", source_message_id: Optional[str] = None
+) -> str | None:
     """Route a command string to its handler.
 
     Args:
         chat_id: The Telegram chat ID the message came from.
         text: The raw message text, e.g. "/today" or "/logs visa-service".
+        source: The originating transport ('telegram' | 'discord'), used
+            only by /capture for idempotency — every other command ignores it.
+        source_message_id: The originating platform message id, used only by
+            /capture so a retried delivery of the same message doesn't create
+            a duplicate capture (see modules/captures.add_capture).
 
     Returns:
         The handler's reply string, or None if `text` is not a known command
@@ -257,9 +270,19 @@ def dispatch(chat_id: str, text: str) -> str | None:
         return None
 
     command = parts[0].lower()
+    args = parts[1:]
+
+    # /capture is the one command that needs the originating message id
+    # (idempotency) — every other handler has the uniform (chat_id, args)
+    # signature, so it's special-cased here rather than threading source/
+    # source_message_id through 30+ unrelated lambdas.
+    if command == "/capture":
+        return captures.handle_capture_command(
+            chat_id, args, source=source, source_message_id=source_message_id
+        )
+
     handler = COMMANDS.get(command)
     if handler is None:
         return None
 
-    args = parts[1:]
     return handler(chat_id, args)

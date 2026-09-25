@@ -205,6 +205,28 @@ CREATE TABLE IF NOT EXISTS weekly_reviews (
     UNIQUE (chat_id, week_start)
 );
 
+-- Capture inbox --------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS captures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id TEXT NOT NULL,
+    raw_text TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'unknown',
+    status TEXT NOT NULL DEFAULT 'inbox',
+    source TEXT NOT NULL,
+    source_message_id TEXT,
+    project TEXT,
+    scheduled_for TEXT,
+    classification_model TEXT,
+    classification_prompt_version TEXT,
+    classification_confidence REAL,
+    daily_priority_id INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (daily_priority_id) REFERENCES daily_priorities (id),
+    UNIQUE (source, source_message_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_tasks_chat_status ON tasks (chat_id, status);
 CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders (delivered, fire_at);
 CREATE INDEX IF NOT EXISTS idx_mood_log_chat ON mood_log (chat_id, created_at);
@@ -221,6 +243,9 @@ CREATE INDEX IF NOT EXISTS idx_weekly_outcomes_plan ON weekly_outcomes (weekly_p
 CREATE INDEX IF NOT EXISTS idx_daily_plans_chat_date ON daily_plans (chat_id, date);
 CREATE INDEX IF NOT EXISTS idx_daily_priorities_plan ON daily_priorities (daily_plan_id, priority_order);
 CREATE INDEX IF NOT EXISTS idx_weekly_reviews_chat_week ON weekly_reviews (chat_id, week_start);
+CREATE INDEX IF NOT EXISTS idx_captures_chat_status ON captures (chat_id, status);
+CREATE INDEX IF NOT EXISTS idx_captures_chat_type ON captures (chat_id, type);
+CREATE INDEX IF NOT EXISTS idx_captures_chat_project ON captures (chat_id, project);
 """
 
 # Allowed task status transitions — no arbitrary status writes (AGENTS.md §14).
@@ -228,6 +253,18 @@ ALLOWED_TASK_TRANSITIONS: dict[str, set[str]] = {
     "pending": {"done", "cancelled"},
     "done": set(),
     "cancelled": set(),
+}
+
+# Allowed capture status transitions. Unlike tasks' one-way pending->done,
+# a capture can be reopened (completed/archived -> inbox) since "I archived
+# this by mistake" or "actually I do need to revisit this" are common for a
+# freeform inbox — see modules/captures.py.
+ALLOWED_CAPTURE_TRANSITIONS: dict[str, set[str]] = {
+    "inbox": {"planned", "in_progress", "completed", "archived"},
+    "planned": {"in_progress", "completed", "archived", "inbox"},
+    "in_progress": {"completed", "archived", "inbox"},
+    "completed": {"archived", "inbox"},
+    "archived": {"inbox"},
 }
 
 
