@@ -21,6 +21,23 @@ def test_ask_gives_an_honest_reply_when_no_model_is_configured(monkeypatch):
     assert "/command" in reply
 
 
+def test_ask_gives_an_honest_reply_when_llama_cpp_is_not_installed(monkeypatch):
+    """The real production case: llama-cpp-python itself isn't installed
+    (see requirements-server.txt) — ModuleNotFoundError, a subclass of
+    ImportError, not FileNotFoundError. Must hit the same honest reply, not
+    the generic "something went wrong, try again" (which is misleading for
+    a standing condition that a retry can never fix)."""
+    _reset_history()
+
+    def _boom():
+        raise ModuleNotFoundError("No module named 'llama_cpp'")
+
+    monkeypatch.setattr(brain, "_get_llm", _boom)
+
+    reply = brain.ask("hello")
+    assert "don't have a language model running" in reply
+
+
 def test_ask_gives_a_generic_retry_reply_on_other_failures(monkeypatch):
     _reset_history()
 

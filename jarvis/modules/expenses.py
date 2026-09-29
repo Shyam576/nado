@@ -11,6 +11,7 @@ text-only; only the OCR text is passed to it.
 import datetime
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -22,6 +23,39 @@ from config import DATA_DIR
 from store.db import get_connection
 
 logger = logging.getLogger(__name__)
+
+# Regex fallback for the amount only, used when the LLM extraction path is
+# unavailable (e.g. llama-cpp-python isn't installed — see
+# requirements-server.txt, deliberately excluded on the low-RAM production
+# droplet) or fails for any other reason. Deliberately amount-only: recipient/
+# remarks need real label:value understanding a regex can't safely guess at
+# (guessing wrong there is worse than leaving them blank for manual entry —
+# see correct_expense()/set_amount()), but the amount is what the "couldn't
+# confidently read" message specifically flags, and it's the one field a
+# banking screenshot reliably renders as a plain decimal number.
+_LABELLED_AMOUNT_RE = re.compile(r"(?:Nu\.?|BTN|Amount)[:\s]*([\d,]+\.\d{2})", re.IGNORECASE)
+_ANY_DECIMAL_RE = re.compile(r"\b(\d[\d,]*\.\d{2})\b")
+
+
+def _regex_extract_amount(ocr_text: str) -> Optional[float]:
+    """Best-effort amount extraction straight from OCR text, no LLM involved.
+
+    Prefers a value next to a currency/amount label; falls back to the first
+    plain two-decimal number in the text otherwise.
+
+    Args:
+        ocr_text: Raw text pulled from the screenshot by _ocr().
+
+    Returns:
+        The amount as a float, or None if nothing decimal-shaped was found.
+    """
+    match = _LABELLED_AMOUNT_RE.search(ocr_text) or _ANY_DECIMAL_RE.search(ocr_text)
+    if not match:
+        return None
+    try:
+        return float(match.group(1).replace(",", ""))
+    except ValueError:
+        return None
 
 RECEIPTS_DIR = DATA_DIR / "receipts"
 
@@ -107,8 +141,9 @@ def _extract_fields(ocr_text: str) -> dict:
 
     Returns:
         A dict with keys amount/recipient/date/remarks (any may be None).
-        On LLM or JSON-parse failure, returns all-None fields rather than
-        raising — the caller can still store the raw OCR text for manual review.
+        On LLM or JSON-parse failure, falls back to a regex-based amount-only
+        guess (see _regex_extract_amount) rather than raising — the caller
+        can still store the raw OCR text for manual review either way.
     """
     import brain  # local import — avoids loading the LLM at module import time
 
@@ -147,7 +182,12 @@ def _extract_fields(ocr_text: str) -> dict:
         }
     except Exception as exc:  # noqa: BLE001
         logger.exception("Field extraction failed: %s", exc)
-        return {"amount": None, "recipient": None, "date": None, "remarks": None}
+        return {
+            "amount": _regex_extract_amount(ocr_text),
+            "recipient": None,
+            "date": None,
+            "remarks": None,
+        }
 
 
 def _classify_category(recipient: Optional[str], remarks: Optional[str]) -> str:

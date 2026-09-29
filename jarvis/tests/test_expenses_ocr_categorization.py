@@ -52,3 +52,40 @@ def test_classify_category_falls_back_on_unrecognised_answer(monkeypatch):
 
     monkeypatch.setattr(brain, "_get_llm", lambda: _fake_llm("I don't know"))
     assert expenses._classify_category(None, "something") == "Miscellaneous"
+
+
+# ---------------------------------------------------------------------------
+# Regex amount fallback — used when the LLM extraction path is unavailable
+# (e.g. llama-cpp-python not installed, see requirements-server.txt) or fails
+# for any other reason. Covers the real production gap: every receipt was
+# returning "couldn't confidently read the amount" because _extract_fields()
+# fell straight to all-None fields with no fallback at all.
+# ---------------------------------------------------------------------------
+
+
+def test_regex_extract_amount_prefers_labelled_value():
+    text = "Some Bank\nTo: Corner Shop\nAmount: Nu. 1,250.50\nRemarks: groceries"
+    assert expenses._regex_extract_amount(text) == 1250.50
+
+
+def test_regex_extract_amount_falls_back_to_any_decimal():
+    text = "Payment confirmation\n150.00\nThank you"
+    assert expenses._regex_extract_amount(text) == 150.00
+
+
+def test_regex_extract_amount_returns_none_when_nothing_decimal_shaped():
+    assert expenses._regex_extract_amount("garbled OCR noise with no numbers") is None
+
+
+def test_extract_fields_falls_back_to_regex_amount_when_llm_unavailable(monkeypatch):
+    import brain
+
+    def _boom():
+        raise ModuleNotFoundError("No module named 'llama_cpp'")
+
+    monkeypatch.setattr(brain, "_get_llm", _boom)
+
+    fields = expenses._extract_fields("Amount: BTN 320.00\nTo: Vendor")
+    assert fields["amount"] == 320.00
+    assert fields["recipient"] is None
+    assert fields["remarks"] is None

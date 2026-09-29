@@ -135,13 +135,14 @@ def ask(user_input: str) -> str:
             top_k=50,
         )
         reply: str = response["choices"][0]["message"]["content"]
-    except FileNotFoundError:
-        # No model file configured at all (see _find_gguf) — this is a
-        # standing condition, not a one-off glitch, so "try again" would be
-        # misleading. Expected on a deployment that deliberately runs
-        # without a local LLM (e.g. a low-RAM server) — every slash command
+    except (FileNotFoundError, ImportError):
+        # No model file configured (_find_gguf) OR llama-cpp-python itself
+        # isn't installed (ModuleNotFoundError, a subclass of ImportError —
+        # see requirements-server.txt, deliberately excluded on a low-RAM
+        # server). Either way this is a standing condition, not a one-off
+        # glitch, so "try again" would be misleading. Every slash command
         # still works via bot/commands.py; only free-form chat is affected.
-        logger.warning("No local model configured — chat falls back to a plain reply.")
+        logger.warning("No local model available — chat falls back to a plain reply.")
         reply = "I don't have a language model running right now, so I can't chat freely — try a /command instead (see /help)."
     except Exception as exc:  # noqa: BLE001
         logger.exception("LLM call failed: %s", exc)

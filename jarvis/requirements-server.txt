@@ -3,13 +3,22 @@
 # Use this instead of requirements.txt when deploying to a server that only
 # runs `python main.py bot` — no microphone, no display, no local LLM. It
 # deliberately excludes:
-#   - llama-cpp-python (local LLM) — everything still works without it: all
-#     slash commands, the whole dashboard, nudges, backups. Only free-form
-#     chat and a handful of LLM-drafted commands (/draft-email, /rewrite,
-#     /notes, /decide, /logs summary, the mentor summary text) degrade to a
-#     plain "try again"/"not available" reply instead of erroring — see
-#     brain.py's ask() and modules/execution.py's generate_mentor_summary().
-#     Add it back (`llama-cpp-python>=0.3.0`) if you later run a model here.
+#   - llama-cpp-python (local LLM) — nothing crashes without it, but more
+#     degrades than just chat: free-form chat and a handful of LLM-drafted
+#     commands (/draft-email, /rewrite, /notes, /decide, /logs summary, the
+#     mentor summary text) give a plain "not available" reply (brain.py's
+#     ask(), modules/execution.py's generate_mentor_summary()); receipt-photo
+#     expense logging still records the amount (regex fallback) but never
+#     recipient/remarks/category (modules/expenses.py's _extract_fields());
+#     natural-language commands fall back to chat for anything beyond the
+#     fast-path regexes for expenses/reminders/screenshots
+#     (modules/intent.py); and /capture always saves as type='unknown' with
+#     no project/date (modules/captures.py). This droplet is 1 vCPU / <1GB
+#     RAM — genuinely too small to run even a small local model, which is
+#     why this is excluded rather than a temporary oversight.
+#     Add it back (`llama-cpp-python>=0.3.0`) if you later run this on
+#     hardware that can host a model, or wire brain.py up to a hosted API
+#     instead (bigger change — brain.py only supports a local GGUF today).
 #   - rich, openai-whisper, scipy, pyaudio — voice_mode's LIVE MIC capture
 #     only (main.py's voice_mode/text_mode paths, and voice.py's listen(),
 #     now import these lazily — bot mode never touches them, so they don't
