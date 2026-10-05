@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS person_facts (
     FOREIGN KEY (person_id) REFERENCES people (id)
 );
 
--- Execution-discipline tracking (mentorship dashboard) --------------------
+-- Execution-discipline tracking (Today/Week/Progress dashboard) -----------
 
 CREATE TABLE IF NOT EXISTS development_cycles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

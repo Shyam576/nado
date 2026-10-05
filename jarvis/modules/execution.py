@@ -1,7 +1,6 @@
 """
 modules/execution.py — Execution-discipline tracking: daily plans, evening
-reviews, weekly outcomes, weekly reviews, and the metrics/mentor summary
-built from them.
+reviews, weekly outcomes, weekly reviews, and the metrics built from them.
 
 This is the ONLY place this business logic lives. The Telegram/Discord bot
 (via bot/commands.py + modules/intent.py) and the web dashboard (via api/)
@@ -20,7 +19,6 @@ import datetime
 import logging
 from typing import Optional
 
-import memory
 from store.db import get_connection
 
 logger = logging.getLogger(__name__)
@@ -406,9 +404,9 @@ def suggest_execution_score(
 def suggest_adjustment(chat_id: str, date: Optional[str] = None) -> str:
     """Draft a one-line "adjustment for tomorrow" via a one-shot LLM call.
 
-    Grounded in today's actual carry-forward reasons and punctuality — same
-    fresh-call pattern as generate_mentor_summary() (doesn't touch
-    brain._history). The wizard shows the result as an editable draft.
+    Grounded in today's actual carry-forward reasons and punctuality — a
+    fresh one-shot call that doesn't touch brain._history, same pattern as
+    digest.py's weekly review. The wizard shows the result as an editable draft.
 
     Args:
         chat_id: The owner to draft for.
@@ -1012,147 +1010,6 @@ def get_progress(chat_id: str, cycle_id: Optional[int] = None) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Mentor summary
-# ---------------------------------------------------------------------------
-
-_MENTOR_SUMMARY_SYSTEM = (
-    "You are Jarvis's mentorship-prep brain. Given this week's and last week's execution "
-    "metrics (punctuality %, priority completion %, carry-forward count, daily review "
-    "consistency %, average mood energy, most-logged mood, and spending), plus the user's "
-    "own weekly-review reflections, write a concise mentor session summary in exactly this "
-    "shape:\n\n"
-    "Since the previous mentorship session:\n"
-    "• <metric change bullets, only for metrics that actually changed or are notable>\n\n"
-    "Main pattern noticed:\n<1-2 sentences, grounded in the data and reflections given, not "
-    "invented — mood or spending only belongs here if it plausibly connects to execution, "
-    "e.g. a mood dip coinciding with a punctuality slip; don't force a connection that isn't "
-    "there>\n\n"
-    "Adjustment for next cycle:\n<1 sentence, concrete and actionable>\n\n"
-    "If there isn't enough data yet (e.g. no prior week to compare against), say so plainly "
-    "instead of inventing numbers or a pattern. Plain text only, no markdown."
-)
-
-
-def _week_mood_and_money(chat_id: str, week_start: str, week_end: str) -> dict:
-    """Return mood/spend context for a specific week — internal helper for
-    generate_mentor_summary(), scoped to week_start/week_end.
-
-    Deliberately NOT habits.weekly_mood_entries()/expenses.weekly_expense_summary()
-    — those are relative to "the last 7 days from right now," which would
-    misrepresent a historical week (e.g. last_week in the mentor summary's
-    week-over-week comparison isn't necessarily the most recent 7 days).
-
-    Returns:
-        {
-          "avg_energy": float | None,     # mean of logged 1-10 energy this week
-          "top_mood": str | None,          # most-logged mood word this week
-          "total_spend": float,            # 0.0 if nothing logged
-          "top_category": str | None,      # highest-spend category this week
-        }
-    """
-    with get_connection() as conn:
-        mood_rows = conn.execute(
-            "SELECT energy, mood FROM mood_log "
-            "WHERE chat_id = ? AND date(created_at) >= ? AND date(created_at) <= ?",
-            (chat_id, week_start, week_end),
-        ).fetchall()
-        expense_rows = conn.execute(
-            "SELECT COALESCE(category, 'Uncategorised') AS category, SUM(amount) AS total FROM expenses "
-            "WHERE chat_id = ? AND date(created_at) >= ? AND date(created_at) <= ? AND amount IS NOT NULL "
-            "GROUP BY category ORDER BY total DESC",
-            (chat_id, week_start, week_end),
-        ).fetchall()
-
-    energies = [row["energy"] for row in mood_rows if row["energy"] is not None]
-    avg_energy = sum(energies) / len(energies) if energies else None
-
-    mood_counts: dict[str, int] = {}
-    for row in mood_rows:
-        mood_counts[row["mood"]] = mood_counts.get(row["mood"], 0) + 1
-    top_mood = max(mood_counts, key=mood_counts.get) if mood_counts else None
-
-    return {
-        "avg_energy": avg_energy,
-        "top_mood": top_mood,
-        "total_spend": sum(row["total"] for row in expense_rows),
-        "top_category": expense_rows[0]["category"] if expense_rows else None,
-    }
-
-
-def generate_mentor_summary(chat_id: str, cycle_id: Optional[int] = None) -> str:
-    """Generate the mentor-session summary via a one-shot LLM call, grounded in real metrics.
-
-    Compares the most recently completed week against the week before it, plus
-    both weeks' weekly-review reflections if present. Uses a fresh one-shot
-    call (doesn't touch brain._history), same pattern as digest.py's weekly
-    review and decision.py's decide().
-
-    Args:
-        chat_id: The owner to summarise.
-        cycle_id: Cycle to report on, defaults to the active cycle.
-
-    Returns:
-        The mentor summary text, or a plain message if there isn't yet a
-        full week of data to compare.
-    """
-    import brain  # local import — avoids loading the model at module import time
-
-    progress = get_progress(chat_id, cycle_id)
-    if len(progress) < 1:
-        return "Not enough data yet for a mentor summary — complete at least one week first."
-
-    this_week = progress[-1]
-    last_week = progress[-2] if len(progress) >= 2 else None
-    this_review = get_weekly_review(chat_id, this_week["week_start"])
-    last_review = get_weekly_review(chat_id, last_week["week_start"]) if last_week else None
-
-    def _fmt(week, review):
-        if week is None:
-            return "  (no prior week)"
-        mood_money = _week_mood_and_money(chat_id, week["week_start"], week["week_end"])
-        lines = [
-            f"  Punctuality: {week['punctuality_pct']:.0f}%" if week["punctuality_pct"] is not None else "  Punctuality: n/a",
-            f"  Priority completion: {week['completion_pct']:.0f}%" if week["completion_pct"] is not None else "  Priority completion: n/a",
-            f"  Carry-forward: {week['carry_forward_count']}",
-            f"  Review consistency: {week['review_consistency_pct']:.0f}%" if week["review_consistency_pct"] is not None else "  Review consistency: n/a",
-            f"  Avg energy: {mood_money['avg_energy']:.1f}/10" if mood_money["avg_energy"] is not None else "  Avg energy: no mood entries logged",
-        ]
-        if mood_money["top_mood"]:
-            lines.append(f"  Most logged mood: {mood_money['top_mood']}")
-        if mood_money["total_spend"]:
-            category_note = f" (top category: {mood_money['top_category']})" if mood_money["top_category"] else ""
-            lines.append(f"  Spend: {mood_money['total_spend']:,.2f} BTN{category_note}")
-        else:
-            lines.append("  Spend: none logged")
-        if review:
-            if review["pattern_observed"]:
-                lines.append(f"  Pattern noted: {review['pattern_observed']}")
-            if review["next_week_adjustment"]:
-                lines.append(f"  Adjustment made: {review['next_week_adjustment']}")
-        return "\n".join(lines)
-
-    context = (
-        f"Last week ({last_week['week_start'] if last_week else 'n/a'}):\n{_fmt(last_week, last_review)}\n\n"
-        f"This week ({this_week['week_start']}):\n{_fmt(this_week, this_review)}"
-    )
-
-    try:
-        llm = brain._get_llm()
-        response = llm.create_chat_completion(
-            messages=[
-                {"role": "system", "content": _MENTOR_SUMMARY_SYSTEM},
-                {"role": "user", "content": context},
-            ],
-            max_tokens=300,
-            temperature=0.4,
-        )
-        return response["choices"][0]["message"]["content"].strip()
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Mentor summary generation failed: %s", exc)
-        return "Couldn't generate the mentor summary right now — try again shortly."
-
-
-# ---------------------------------------------------------------------------
 # Chat-text formatting — shared by bot/commands.py's /plan, /review,
 # /weekstatus and modules/intent.py's conversational equivalents, so the
 # Telegram/Discord phrasing and the dashboard read the exact same data.
@@ -1245,34 +1102,3 @@ def describe_week(chat_id: str) -> str:
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# Mentorship-prep context (5Ws + 2Hs)
-# ---------------------------------------------------------------------------
-
-_5W2H_FIELDS = ("what", "why", "when", "who", "where", "how", "how_much")
-
-
-def get_mentorship_context(chat_id: str) -> dict:
-    """Return the mentorship page's context: development action + 5Ws/2Hs.
-
-    development_action comes from the active cycle (set at cycle creation).
-    The 5Ws/2Hs are freeform text the user fills in once and rarely changes —
-    they live in memory.py's preferences store rather than a new DB table,
-    matching memory.py's own documented scope ("preferences / facts").
-    """
-    cycle = get_active_cycle(chat_id)
-    saved = memory.get_preference("mentorship_5w2h", {})
-    return {
-        "development_action": cycle["development_action"] if cycle else None,
-        **{field: saved.get(field) for field in _5W2H_FIELDS},
-    }
-
-
-def set_mentorship_context(chat_id: str, **fields) -> dict:
-    """Update one or more 5Ws/2Hs fields — a field left as None keeps its saved value."""
-    saved = memory.get_preference("mentorship_5w2h", {})
-    for field in _5W2H_FIELDS:
-        if fields.get(field) is not None:
-            saved[field] = fields[field]
-    memory.set_preference("mentorship_5w2h", saved)
-    return get_mentorship_context(chat_id)

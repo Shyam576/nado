@@ -237,7 +237,7 @@ class WeekOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Progress / mentorship — responses
+# Progress — responses
 # ---------------------------------------------------------------------------
 
 
@@ -256,10 +256,6 @@ class ProgressOut(BaseModel):
     weeks: list[WeekMetricsOut]
 
 
-class MentorSummaryOut(BaseModel):
-    summary: str
-
-
 # ---------------------------------------------------------------------------
 # Header strip / Life page (read-only glance widgets)
 # ---------------------------------------------------------------------------
@@ -276,17 +272,6 @@ class HeaderOut(BaseModel):
     next_reminder: Optional[NextReminderOut] = None
     k8s_healthy: bool
     k8s_unhealthy_count: int
-
-
-class MentorshipContextOut(BaseModel):
-    development_action: Optional[str] = None
-    what: Optional[str] = None
-    why: Optional[str] = None
-    when: Optional[str] = None
-    who: Optional[str] = None
-    where: Optional[str] = None
-    how: Optional[str] = None
-    how_much: Optional[str] = None
 
 
 class SpendCategoryOut(BaseModel):
@@ -367,16 +352,6 @@ class StaleContactOut(BaseModel):
 class PeopleGlanceOut(BaseModel):
     upcoming_birthdays: list[UpcomingBirthdayOut]
     no_contact: list[StaleContactOut]
-
-
-class MentorshipContextIn(BaseModel):
-    what: Optional[str] = None
-    why: Optional[str] = None
-    when: Optional[str] = None
-    who: Optional[str] = None
-    where: Optional[str] = None
-    how: Optional[str] = None
-    how_much: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

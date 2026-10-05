@@ -1,5 +1,5 @@
 """tests/test_execution.py — daily plans, evening review, weekly outcomes,
-metrics, and the mentor summary (LLM mocked, same pattern as test_vision.py)."""
+and metrics."""
 
 import datetime
 
@@ -285,123 +285,6 @@ def test_get_progress_empty_without_a_cycle():
 
 
 # ---------------------------------------------------------------------------
-# Mentor summary (LLM mocked — same pattern as tests/test_vision.py)
-# ---------------------------------------------------------------------------
-
-
-def test_generate_mentor_summary_without_any_data():
-    assert "Not enough data" in execution.generate_mentor_summary("owner")
-
-
-def test_generate_mentor_summary_calls_llm_with_metrics(monkeypatch):
-    week = _monday()
-    p = execution.add_priority("owner", "A", date=week)
-    execution.complete_priority("owner", p["id"])
-    execution.submit_evening_review("owner", week, punctual=True)
-    cycle_start = (datetime.date.fromisoformat(week) - datetime.timedelta(days=7)).isoformat()
-    execution.create_cycle("owner", "Cycle", cycle_start, week)
-
-    captured = {}
-
-    class _FakeLLM:
-        def create_chat_completion(self, **kwargs):
-            captured["messages"] = kwargs["messages"]
-            return {"choices": [{"message": {"content": "Since the previous session: improved."}}]}
-
-    monkeypatch.setattr(brain, "_get_llm", lambda: _FakeLLM())
-
-    summary = execution.generate_mentor_summary("owner")
-    assert summary == "Since the previous session: improved."
-    assert "Punctuality" in captured["messages"][1]["content"]
-
-
-def test_generate_mentor_summary_handles_llm_failure(monkeypatch):
-    week = _monday()
-    execution.add_priority("owner", "A", date=week)
-    cycle_start = (datetime.date.fromisoformat(week) - datetime.timedelta(days=7)).isoformat()
-    execution.create_cycle("owner", "Cycle", cycle_start, week)
-
-    class _BoomLLM:
-        def create_chat_completion(self, **kwargs):
-            raise RuntimeError("model not loaded")
-
-    monkeypatch.setattr(brain, "_get_llm", lambda: _BoomLLM())
-
-    summary = execution.generate_mentor_summary("owner")
-    assert "Couldn't generate" in summary
-
-
-# ---------------------------------------------------------------------------
-# Mentor summary — mood/money enrichment
-# ---------------------------------------------------------------------------
-
-
-def test_week_mood_and_money_computes_avg_energy_and_top_category():
-    week = _monday()
-    week_end = execution._week_end_for(week)
-    with get_connection() as conn:
-        conn.execute(
-            "INSERT INTO mood_log (chat_id, mood, energy, created_at) VALUES (?, ?, ?, ?)",
-            ("owner", "focused", 8, f"{week}T09:00:00"),
-        )
-        conn.execute(
-            "INSERT INTO mood_log (chat_id, mood, energy, created_at) VALUES (?, ?, ?, ?)",
-            ("owner", "focused", 6, f"{week}T18:00:00"),
-        )
-        conn.execute(
-            "INSERT INTO expenses (chat_id, amount, category, created_at) VALUES (?, ?, ?, ?)",
-            ("owner", 500.0, "Food", f"{week}T12:00:00"),
-        )
-
-    context = execution._week_mood_and_money("owner", week, week_end)
-    assert context["avg_energy"] == 7.0
-    assert context["top_mood"] == "focused"
-    assert context["total_spend"] == 500.0
-    assert context["top_category"] == "Food"
-
-
-def test_week_mood_and_money_empty_week():
-    week = _monday()
-    context = execution._week_mood_and_money("owner", week, execution._week_end_for(week))
-    assert context == {"avg_energy": None, "top_mood": None, "total_spend": 0, "top_category": None}
-
-
-def test_generate_mentor_summary_includes_mood_and_spend_in_llm_context(monkeypatch):
-    week = _monday()
-    p = execution.add_priority("owner", "A", date=week)
-    execution.complete_priority("owner", p["id"])
-    execution.submit_evening_review("owner", week, punctual=True)
-    cycle_start = (datetime.date.fromisoformat(week) - datetime.timedelta(days=7)).isoformat()
-    execution.create_cycle("owner", "Cycle", cycle_start, week)
-
-    with get_connection() as conn:
-        conn.execute(
-            "INSERT INTO mood_log (chat_id, mood, energy, created_at) VALUES (?, ?, ?, ?)",
-            ("owner", "stressed", 3, f"{week}T09:00:00"),
-        )
-        conn.execute(
-            "INSERT INTO expenses (chat_id, amount, category, created_at) VALUES (?, ?, ?, ?)",
-            ("owner", 1200.0, "Junk", f"{week}T12:00:00"),
-        )
-
-    captured = {}
-
-    class _FakeLLM:
-        def create_chat_completion(self, **kwargs):
-            captured["messages"] = kwargs["messages"]
-            return {"choices": [{"message": {"content": "ok"}}]}
-
-    monkeypatch.setattr(brain, "_get_llm", lambda: _FakeLLM())
-
-    execution.generate_mentor_summary("owner")
-    context = captured["messages"][1]["content"]
-    assert "Avg energy: 3.0/10" in context
-    assert "stressed" in context
-    assert "1,200.00 BTN" in context
-    assert "Junk" in context
-
-
-# ---------------------------------------------------------------------------
 # Chat-text formatting (shared by bot commands + conversational intents)
 # ---------------------------------------------------------------------------
 
@@ -451,33 +334,6 @@ def test_describe_week_includes_scorecard_and_outcomes():
     text = execution.describe_week("owner")
     assert "Punctuality" in text
     assert "Ship the fix" in text
-
-
-# ---------------------------------------------------------------------------
-# Mentorship context (5Ws + 2Hs)
-# ---------------------------------------------------------------------------
-
-
-def test_get_mentorship_context_defaults_without_cycle_or_saved_fields():
-    ctx = execution.get_mentorship_context("owner")
-    assert ctx["development_action"] is None
-    assert ctx["what"] is None
-
-
-def test_get_mentorship_context_pulls_development_action_from_active_cycle():
-    execution.create_cycle("owner", "Cycle", "2026-09-01", "2026-11-01", development_action="Improve execution discipline")
-    ctx = execution.get_mentorship_context("owner")
-    assert ctx["development_action"] == "Improve execution discipline"
-
-
-def test_set_mentorship_context_saves_and_preserves_unspecified_fields():
-    execution.set_mentorship_context("owner", what="Improve punctuality", why="Feedback from leadership")
-    execution.set_mentorship_context("owner", when="8-12 week cycle")
-
-    ctx = execution.get_mentorship_context("owner")
-    assert ctx["what"] == "Improve punctuality"
-    assert ctx["why"] == "Feedback from leadership"
-    assert ctx["when"] == "8-12 week cycle"
 
 
 # ---------------------------------------------------------------------------

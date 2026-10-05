@@ -33,9 +33,6 @@ from api.models import (
     DailyPlanOut,
     EveningReviewIn,
     HeaderOut,
-    MentorshipContextIn,
-    MentorshipContextOut,
-    MentorSummaryOut,
     MoneyOut,
     MoodOut,
     MorningPlanIn,
@@ -233,7 +230,7 @@ def get_weekly_review_suggestions(week_start: Optional[str] = None):
 
 
 # ---------------------------------------------------------------------------
-# Development cycle / progress / mentorship
+# Development cycle / progress
 # ---------------------------------------------------------------------------
 
 
@@ -252,21 +249,6 @@ def create_cycle(body: CycleIn):
 @router.get("/progress", response_model=ProgressOut)
 def get_progress(cycle_id: Optional[int] = None):
     return {"weeks": execution.get_progress(OWNER_ID, cycle_id)}
-
-
-@router.get("/mentor-summary", response_model=MentorSummaryOut)
-def get_mentor_summary(cycle_id: Optional[int] = None):
-    return {"summary": execution.generate_mentor_summary(OWNER_ID, cycle_id)}
-
-
-@router.get("/mentorship-context", response_model=MentorshipContextOut)
-def get_mentorship_context():
-    return execution.get_mentorship_context(OWNER_ID)
-
-
-@router.post("/mentorship-context", response_model=MentorshipContextOut)
-def set_mentorship_context(body: MentorshipContextIn):
-    return execution.set_mentorship_context(OWNER_ID, **body.model_dump())
 
 
 # ---------------------------------------------------------------------------
