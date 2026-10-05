@@ -56,15 +56,28 @@ want to undo in a freeform inbox.
 ## Classification
 
 One LLM call per `/capture <text>` (grammar-constrained JSON, temperature 0 — same pattern as
-`modules/intent.py`'s existing classifier). No deterministic fast-path for the *type* itself —
-task vs. idea vs. work_issue vs. personal_thought is inherently a judgment call, and a brittle
-regex heuristic here would risk silently mis-filing things with false confidence. The
-deterministic, correctness-critical part is guaranteed instead:
+`modules/intent.py`'s existing classifier) is the primary path whenever a model is available.
 
-- **If the LLM call fails for any reason**, the capture is still saved, as `type='unknown'` —
-  never lost. (`modules/captures.py::_classify`)
-- **Idempotency is enforced at the database level** (`UNIQUE(source, source_message_id)`), not
-  left to classification or application logic.
+**When it isn't** (this bot currently runs with no local LLM on production — the droplet is
+1 vCPU / <1GB RAM, see `requirements-server.txt`), a small set of high-precision keyword/phrase
+rules (`modules/captures.py::_FALLBACK_TYPE_RULES`) catches the unambiguous cases instead of
+leaving everything as `unknown`:
+
+| Pattern | Type |
+|---|---|
+| starts with "remind me" | `reminder` (also extracts a literal "today"/"tomorrow" date) |
+| starts with "idea", or contains "idea for" / "what if" | `idea` |
+| starts with "learn"/"study" | `learning` |
+| starts with "investigate", or contains "bug"/"broken"/"not working" | `work_issue` |
+
+This is deliberately narrow — a capture matching none of these still saves as `unknown` rather
+than risk a confidently-wrong guess. It only runs when the LLM is unavailable or fails, never as
+a replacement for the LLM's actual judgment (same trade-off as `modules/expenses.py`'s
+`_keyword_classify_category`, added for the same reason). `classification_model` records which
+path produced the result — the configured LLM, `'deterministic-fallback'`, or `None` for a
+plain `unknown` — so a systematically wrong guess can be traced to its source.
+
+Either way, **the capture is always saved**, never lost, regardless of how classification goes.
 
 ## Idempotency
 
@@ -106,19 +119,49 @@ input:
 4. **Energy/mood on a daily plan** — not duplicated; still lives in `mood_log` via `/mood`.
 5. **The droplet's intermittent `readonly database` crash** — unrelated, tracked separately (not a Capture issue).
 
+## Dashboard — Inbox page
+
+`/inbox` (nav tab added to `dashboard/templates/base.html`) mirrors the existing Today/Week
+pages: same auth (`require_page_auth`), same vanilla-JS `api()`/`showError()` pattern
+(`dashboard/static/inbox.js`), same card-based layout.
+
+- **Quick capture** — a text box at the top posts to `POST /api/captures` (`source='dashboard'`,
+  no `source_message_id` — see Idempotency above for why that's fine for this source).
+- **Filters** — status/type/project dropdowns, applied client-side against one fetched list
+  (`GET /api/captures`, up to 200 rows) rather than refetching per filter change — a personal
+  inbox is small enough that this is simpler and just as fast. The API route still accepts
+  `status`/`type`/`project` query params for other callers/testing.
+- **Inline editing** — the type `<select>`, project `<input>`, and schedule `<input type=date>`
+  on each row PATCH/POST immediately on change (`PATCH /api/captures/{id}`,
+  `POST /api/captures/{id}/schedule`), same "always-editable, no separate edit mode" convention
+  as `week.js`'s outcome rows.
+- **Status actions** — Done/Archive/Reopen buttons call `POST /api/captures/{id}/status`, which
+  enforces `ALLOWED_CAPTURE_TRANSITIONS` server-side (a bad transition returns 400, not a
+  silent no-op).
+
+`modules/captures.py::correct_capture()` picked up a validation gap while building this: it
+previously accepted a malformed `scheduled_for` string unchecked (only `schedule_capture()`, a
+thin wrapper, validated the date format). Fixed — both now reject a non-empty, non-ISO date.
+
 ## Testing
 
 `tests/test_captures.py` — LLM mocked (same pattern as `tests/test_vision.py`), covers
-classification (including malformed LLM output and total LLM failure), idempotency (same
-message id, different sources, no message id at all), correction, status-transition
-enforcement, filtering, and the `/capture` command surface end-to-end.
+classification (malformed LLM output, total LLM failure, the deterministic fallback rules),
+idempotency (same message id, different sources, no message id at all), correction
+(including the `scheduled_for` validation fix), status-transition enforcement, filtering, and
+the `/capture` command surface end-to-end.
+
+The Inbox page's API surface was verified end-to-end with `starlette.testclient.TestClient`
+against a throwaway temp database (auth → create → correct → status → schedule → list), and
+`dashboard/static/inbox.js` was checked with `node --check` for syntax — no browser was
+available in this environment to visually confirm rendering, so a quick look once deployed is
+worth doing.
 
 ## Roadmap (not built yet)
 
 - `/shutdown`, `/week` command aliasing onto the existing `execution.py` evening/weekly review.
-- Dashboard **Inbox** page (`/api/captures*`), mirroring the existing Today/Week pages.
 - Promoting a capture into a `daily_priority` (the `daily_priority_id` column already exists
-  for this).
+  for this — no UI wired up yet).
 - Scheduled reminder jobs (morning/evening/weekly prompts) using `config.TIMEZONE`.
 
 See the Phase 0 discovery conversation for the full phased plan.

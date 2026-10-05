@@ -377,3 +377,59 @@ class MentorshipContextIn(BaseModel):
     where: Optional[str] = None
     how: Optional[str] = None
     how_much: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Inbox (captures) — requests
+# ---------------------------------------------------------------------------
+
+
+class CaptureIn(BaseModel):
+    raw_text: str = Field(min_length=1)
+
+
+class CaptureCorrectIn(BaseModel):
+    type: Optional[str] = None
+    project: Optional[str] = None
+    # No pattern constraint here (unlike _DATE_PATTERN elsewhere) — an empty
+    # string is a valid request meaning "clear the date", which a pattern
+    # requiring YYYY-MM-DD would reject outright. modules/captures.py's
+    # correct_capture() validates any non-empty value itself.
+    scheduled_for: Optional[str] = None
+
+
+class CaptureStatusIn(BaseModel):
+    status: str
+
+
+class CaptureScheduleIn(BaseModel):
+    scheduled_for: str = Field(pattern=_DATE_PATTERN)
+
+
+# ---------------------------------------------------------------------------
+# Inbox (captures) — responses
+# ---------------------------------------------------------------------------
+
+
+class CaptureOut(BaseModel):
+    id: int
+    chat_id: str
+    raw_text: str
+    type: str
+    status: str
+    source: str
+    source_message_id: Optional[str] = None
+    project: Optional[str] = None
+    scheduled_for: Optional[str] = None
+    classification_model: Optional[str] = None
+    classification_prompt_version: Optional[str] = None
+    classification_confidence: Optional[float] = None
+    daily_priority_id: Optional[int] = None
+    created_at: str
+    updated_at: str
+
+
+class CaptureListOut(BaseModel):
+    captures: list[CaptureOut]
+    types: list[str]
+    statuses: list[str]

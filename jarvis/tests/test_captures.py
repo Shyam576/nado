@@ -1,6 +1,7 @@
 """tests/test_captures.py — capture inbox: classification (LLM mocked, same
 pattern as test_vision.py), idempotency, correction, status transitions."""
 
+import datetime
 import json
 
 import brain
@@ -65,6 +66,71 @@ def test_add_capture_falls_back_to_unknown_on_llm_failure(monkeypatch):
     assert capture["classification_model"] is None
     # The capture is still saved, never lost:
     assert capture["raw_text"] == "Something ambiguous"
+
+
+def _llm_unavailable(monkeypatch):
+    def _boom():
+        raise ModuleNotFoundError("No module named 'llama_cpp'")
+
+    monkeypatch.setattr(brain, "_get_llm", _boom)
+
+
+# ---------------------------------------------------------------------------
+# Deterministic fallback (LLM unavailable) — the real production case: this
+# bot currently runs with no local LLM installed at all (see
+# requirements-server.txt), so every capture used to save as 'unknown' with
+# nothing to go on. These rules are high-precision and deliberately narrow —
+# see modules/captures.py's _FALLBACK_TYPE_RULES.
+# ---------------------------------------------------------------------------
+
+
+def test_fallback_classify_matches_reminder():
+    assert captures._fallback_classify("Remind me to email the API team")["type"] == "reminder"
+
+
+def test_fallback_classify_extracts_tomorrow_for_reminder():
+    result = captures._fallback_classify("Remind me to email the API team tomorrow")
+    tomorrow = datetime.date.today() + datetime.timedelta(days=1)
+    assert result["scheduled_for"] == tomorrow.isoformat()
+
+
+def test_fallback_classify_matches_idea():
+    assert captures._fallback_classify("Idea for automating deployment reports")["type"] == "idea"
+
+
+def test_fallback_classify_matches_learning():
+    assert captures._fallback_classify("Learn Kubernetes network policies")["type"] == "learning"
+
+
+def test_fallback_classify_matches_work_issue():
+    assert captures._fallback_classify("Investigate payment success without status update")["type"] == "work_issue"
+
+
+def test_fallback_classify_returns_unknown_without_a_match():
+    result = captures._fallback_classify("Something with no obvious signal at all")
+    assert result["type"] == "unknown"
+    assert result["model"] is None
+    assert result["confidence"] is None
+
+
+def test_fallback_classify_marks_matched_guesses_as_deterministic():
+    result = captures._fallback_classify("Idea for a thing")
+    assert result["model"] == "deterministic-fallback"
+    assert result["confidence"] == 0.6
+    assert result["prompt_version"] == "captures-v1-fallback"
+
+
+def test_add_capture_uses_deterministic_fallback_when_llm_unavailable(monkeypatch):
+    _llm_unavailable(monkeypatch)
+
+    capture = captures.add_capture(
+        "owner", "Investigate payment success without status update", source="telegram", source_message_id="50"
+    )
+
+    assert capture["type"] == "work_issue"
+    assert capture["classification_model"] == "deterministic-fallback"
+    assert capture["classification_confidence"] == 0.6
+    assert capture["classification_prompt_version"] == "captures-v1-fallback"
 
 
 def test_add_capture_rejects_invalid_type_from_llm(monkeypatch):
@@ -151,6 +217,21 @@ def test_correct_capture_can_clear_project(monkeypatch):
 
     cleared = captures.correct_capture("owner", capture["id"], project="")
     assert cleared["project"] is None
+
+
+def test_correct_capture_rejects_malformed_scheduled_for(monkeypatch):
+    _mock_classification(monkeypatch)
+    capture = captures.add_capture("owner", "Something", source="telegram", source_message_id="60")
+
+    assert captures.correct_capture("owner", capture["id"], scheduled_for="not-a-date") is None
+
+
+def test_correct_capture_can_clear_scheduled_for(monkeypatch):
+    _mock_classification(monkeypatch, scheduled_for="2026-10-10")
+    capture = captures.add_capture("owner", "Something", source="telegram", source_message_id="61")
+
+    cleared = captures.correct_capture("owner", capture["id"], scheduled_for="")
+    assert cleared["scheduled_for"] is None
 
 
 # ---------------------------------------------------------------------------

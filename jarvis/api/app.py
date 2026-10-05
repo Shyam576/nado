@@ -66,4 +66,10 @@ def create_app() -> FastAPI:
             return redirect
         return templates.TemplateResponse(request, "mentorship.html", {"active_page": "mentorship"})
 
+    @app.get("/inbox")
+    async def inbox_page(request: Request):
+        if (redirect := require_page_auth(request)) is not None:
+            return redirect
+        return templates.TemplateResponse(request, "inbox.html", {"active_page": "inbox"})
+
     return app

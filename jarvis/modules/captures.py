@@ -8,12 +8,19 @@ status lifecycle (CAPTURE_STATUSES) so it can be triaged later — turned into
 a daily priority, archived, or corrected if the classification was wrong.
 
 Classification pipeline (see AGENTS.md's "deterministic rules first, LLM for
-ambiguous cases" guidance): whether something is a task vs. an idea vs. a
-work issue vs. a personal thought is inherently a judgment call — there's no
-safe deterministic rule for that without guessing. The one deterministic
-piece is correctness-critical instead: idempotency (source_message_id) and
-the safe-fallback-to-'unknown' behaviour if the LLM call fails. Both are
-enforced here, not left to the caller.
+ambiguous cases" guidance): the LLM is the primary classifier whenever it's
+available. When it isn't (this bot currently runs with no local LLM on
+production — see requirements-server.txt), a small set of high-precision
+keyword/phrase rules (_FALLBACK_TYPE_RULES) catches the unambiguous cases
+("remind me...", "idea for...", "investigate...") instead of leaving
+everything as 'unknown' — same reasoning as modules/expenses.py's
+_keyword_classify_category fallback. It's deliberately narrow: a capture
+that matches nothing still saves as 'unknown' rather than risk a wrong
+guess with false confidence. classification_model records which path
+produced the result (the configured LLM, 'deterministic-fallback', or None
+for a plain 'unknown') so a systematically wrong guess can be traced back
+to its source. Idempotency (source_message_id) is enforced independently
+of all this, in add_capture() itself.
 
 The original text and the classification are stored separately (raw_text is
 never overwritten) so a wrong AI guess can always be corrected without
@@ -23,6 +30,7 @@ losing what was actually said — see correct_capture().
 import datetime
 import json
 import logging
+import re
 from typing import Optional
 
 from config import OLLAMA_MODEL
@@ -82,20 +90,81 @@ def _now() -> str:
     return datetime.datetime.now().isoformat()
 
 
+# Deterministic fallback used only when the LLM path is unavailable or fails
+# — never when the LLM succeeds, even with low confidence (that's still a
+# real judgment call; this is a last resort for when there's no judgment
+# available at all). Checked in order; first match wins. Deliberately narrow
+# and high-precision: a capture matching nothing here still saves as
+# 'unknown' rather than risk a confidently-wrong guess — same trade-off as
+# modules/expenses.py's _keyword_classify_category.
+_FALLBACK_PROMPT_VERSION = "captures-v1-fallback"
+
+_FALLBACK_TYPE_RULES: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"^\s*remind\s+me\b", re.IGNORECASE), "reminder"),
+    (re.compile(r"^\s*idea\b", re.IGNORECASE), "idea"),
+    (re.compile(r"\bidea for\b", re.IGNORECASE), "idea"),
+    (re.compile(r"\bwhat if\b", re.IGNORECASE), "idea"),
+    (re.compile(r"^\s*(?:learn|study)\b", re.IGNORECASE), "learning"),
+    (re.compile(r"^\s*investigate\b", re.IGNORECASE), "work_issue"),
+    (re.compile(r"\b(?:bug|broken|not working|isn't working|doesn't work)\b", re.IGNORECASE), "work_issue"),
+]
+
+
+def _fallback_classify(raw_text: str) -> dict:
+    """Deterministic type guess, used only when the LLM is unavailable or fails.
+
+    Only `type` (and, for a matched 'reminder', a literal "today"/"tomorrow"
+    date) is inferred — project and anything else needs real understanding a
+    keyword rule can't safely guess at.
+
+    Args:
+        raw_text: The captured text to classify.
+
+    Returns:
+        Same shape as _classify()'s success return. `model` is
+        'deterministic-fallback' when a rule matched, None when nothing did
+        (plain 'unknown' — nothing to attribute the guess to).
+    """
+    for pattern, matched_type in _FALLBACK_TYPE_RULES:
+        if pattern.search(raw_text):
+            scheduled_for = None
+            if matched_type == "reminder":
+                lowered = raw_text.lower()
+                today = datetime.date.today()
+                if re.search(r"\btomorrow\b", lowered):
+                    scheduled_for = (today + datetime.timedelta(days=1)).isoformat()
+                elif re.search(r"\btoday\b", lowered):
+                    scheduled_for = today.isoformat()
+            return {
+                "type": matched_type,
+                "project": None,
+                "scheduled_for": scheduled_for,
+                "confidence": 0.6,  # a plain keyword match, not real judgment — kept well below a typical LLM confidence
+                "model": "deterministic-fallback",
+                "prompt_version": _FALLBACK_PROMPT_VERSION,
+            }
+
+    return {
+        "type": "unknown",
+        "project": None,
+        "scheduled_for": None,
+        "confidence": None,
+        "model": None,
+        "prompt_version": None,
+    }
+
+
 def _classify(raw_text: str) -> dict:
-    """One-shot LLM classification. Never raises — falls back to 'unknown' on any failure.
+    """One-shot LLM classification. Never raises — uses _fallback_classify() on any failure.
 
     Args:
         raw_text: The captured text to classify.
 
     Returns:
         {"type": str, "project": str | None, "scheduled_for": str | None,
-         "confidence": float | None, "model": str | None}
-        model is None when classification fell back (nothing to attribute the guess to).
+         "confidence": float | None, "model": str | None, "prompt_version": str | None}
     """
     import brain  # local import — avoids loading the model at module import time
-
-    fallback = {"type": "unknown", "project": None, "scheduled_for": None, "confidence": None, "model": None}
 
     try:
         llm = brain._get_llm()
@@ -111,8 +180,8 @@ def _classify(raw_text: str) -> dict:
         )
         parsed = json.loads(response["choices"][0]["message"]["content"])
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Capture classification failed (%s) — saving as unknown.", exc)
-        return fallback
+        logger.warning("Capture classification failed (%s) — trying deterministic fallback.", exc)
+        return _fallback_classify(raw_text)
 
     capture_type = parsed.get("type")
     if capture_type not in CAPTURE_TYPES:
@@ -140,6 +209,7 @@ def _classify(raw_text: str) -> dict:
         "scheduled_for": scheduled_for,
         "confidence": confidence,
         "model": OLLAMA_MODEL,
+        "prompt_version": _PROMPT_VERSION,
     }
 
 
@@ -199,7 +269,7 @@ def add_capture(
                 classification["project"],
                 classification["scheduled_for"],
                 classification["model"],
-                _PROMPT_VERSION if classification["model"] else None,
+                classification["prompt_version"],
                 classification["confidence"],
                 now,
                 now,
@@ -273,10 +343,16 @@ def correct_capture(
         scheduled_for: New ISO date, or None to leave unchanged. Pass "" to clear it.
 
     Returns:
-        The updated row, or None if not found/not owned, or if `type_` is invalid.
+        The updated row, or None if not found/not owned, `type_` is invalid,
+        or `scheduled_for` is a non-empty, non-ISO-date string.
     """
     if type_ is not None and type_ not in CAPTURE_TYPES:
         return None
+    if scheduled_for:
+        try:
+            datetime.date.fromisoformat(scheduled_for)
+        except ValueError:
+            return None
 
     capture = get_capture(chat_id, capture_id)
     if capture is None:

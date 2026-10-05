@@ -21,6 +21,12 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from api.auth import require_session
 from api.models import (
+    CaptureCorrectIn,
+    CaptureIn,
+    CaptureListOut,
+    CaptureOut,
+    CaptureScheduleIn,
+    CaptureStatusIn,
     CarryForwardIn,
     CycleIn,
     CycleOut,
@@ -52,7 +58,7 @@ from api.models import (
     WeekOut,
 )
 from config import OWNER_ID
-from modules import calendar_app, devops, execution, expenses, finance, habits, people, tasks
+from modules import calendar_app, captures, devops, execution, expenses, finance, habits, people, tasks
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_session)])
 
@@ -305,3 +311,51 @@ def get_people_glance():
         "upcoming_birthdays": people.upcoming_birthdays(OWNER_ID),
         "no_contact": people.stale_contacts(OWNER_ID),
     }
+
+
+# ---------------------------------------------------------------------------
+# Inbox (captures)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/captures", response_model=CaptureListOut)
+def get_captures(status: Optional[str] = None, type: Optional[str] = None, project: Optional[str] = None):
+    return {
+        "captures": captures.list_captures(OWNER_ID, status=status, type_=type, project=project, limit=200),
+        "types": captures.CAPTURE_TYPES,
+        "statuses": captures.CAPTURE_STATUSES,
+    }
+
+
+@router.post("/captures", response_model=CaptureOut)
+def add_capture(body: CaptureIn):
+    return captures.add_capture(OWNER_ID, body.raw_text, source="dashboard")
+
+
+@router.patch("/captures/{capture_id}", response_model=CaptureOut)
+def correct_capture(capture_id: int, body: CaptureCorrectIn):
+    row = captures.correct_capture(
+        OWNER_ID, capture_id, type_=body.type, project=body.project, scheduled_for=body.scheduled_for
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Capture not found, or type/date is invalid")
+    return row
+
+
+@router.post("/captures/{capture_id}/status", response_model=CaptureOut)
+def set_capture_status(capture_id: int, body: CaptureStatusIn):
+    try:
+        row = captures.update_status(OWNER_ID, capture_id, body.status)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Capture not found")
+    return row
+
+
+@router.post("/captures/{capture_id}/schedule", response_model=CaptureOut)
+def schedule_capture(capture_id: int, body: CaptureScheduleIn):
+    row = captures.schedule_capture(OWNER_ID, capture_id, body.scheduled_for)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Capture not found, or date is invalid")
+    return row
