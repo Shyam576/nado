@@ -190,16 +190,63 @@ def _extract_fields(ocr_text: str) -> dict:
         }
 
 
-def _classify_category(recipient: Optional[str], remarks: Optional[str]) -> str:
+# Keyword fallback for category, used only when the LLM path is unavailable
+# (see _regex_extract_amount's docstring for the same situation on amount) —
+# not a replacement for the LLM's judgment, just better than defaulting every
+# single expense to Miscellaneous when there's an obvious keyword match sitting
+# right there in the receipt text. Checked in this order; first match wins.
+_CATEGORY_KEYWORDS: dict[str, list[str]] = {
+    "Health": ["pharmacy", "hospital", "clinic", "doctor", "medicine", "medical"],
+    "Investment/Gold": ["gold", "silver", "bullion"],
+    "Drinking": ["bar", "beer", "wine", "whisky", "whiskey", "liquor"],
+    "Snooker": ["snooker", "billiards", "pool hall"],
+    "Junk": ["snack", "chips", "junk food", "fast food", "kfc", "burger"],
+    "Utilities/Bills": [
+        "electricity", "water bill", "internet", "wifi", "recharge", "top-up", "topup",
+        "mobile data", "bhutan telecom", "tashicell", "rent",
+    ],
+    "Transport": ["taxi", "bus fare", "petrol", "diesel", "fuel", "parking"],
+    "Food": [
+        "restaurant", "cafe", "hotel", "lunch", "dinner", "breakfast",
+        "grocery", "groceries", "bakery", "momo",
+    ],
+}
+
+
+def _keyword_classify_category(text: str) -> Optional[str]:
+    """Match `text` against _CATEGORY_KEYWORDS, case-insensitive substring match.
+
+    Args:
+        text: Any combination of recipient/remarks/raw OCR text.
+
+    Returns:
+        The first matching category, or None if nothing matched.
+    """
+    lowered = text.lower()
+    for category, keywords in _CATEGORY_KEYWORDS.items():
+        if any(keyword in lowered for keyword in keywords):
+            return category
+    return None
+
+
+def _classify_category(
+    recipient: Optional[str], remarks: Optional[str], extra_context: Optional[str] = None
+) -> str:
     """Classify an expense into one of CATEGORIES using the recipient/remarks text.
 
     Args:
         recipient: The extracted recipient name, if any.
         remarks: The extracted (or user-supplied) remarks, if any.
+        extra_context: Additional text to fall back to keyword-matching
+            against if the LLM path is unavailable — e.g. the raw OCR text,
+            which usually has far more signal than recipient/remarks when
+            those came back empty (no LLM to extract them in the first
+            place). Never sent to the LLM itself, only used as a fallback.
 
     Returns:
-        One of CATEGORIES. Falls back to "Miscellaneous" on any failure or
-        if the model's response doesn't exactly match a known category.
+        One of CATEGORIES. Falls back to a keyword match against
+        recipient/remarks/extra_context, then "Miscellaneous", if the LLM
+        is unavailable, fails, or its response doesn't match a known category.
     """
     import brain  # local import — avoids loading the LLM at module import time
 
@@ -233,6 +280,11 @@ def _classify_category(recipient: Optional[str], remarks: Optional[str]) -> str:
         logger.warning("Category classification returned unrecognised value: %r", answer)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Category classification failed: %s", exc)
+        combined = " ".join(filter(None, [recipient, remarks, extra_context]))
+        if combined:
+            keyword_match = _keyword_classify_category(combined)
+            if keyword_match:
+                return keyword_match
     return "Miscellaneous"
 
 
@@ -258,7 +310,7 @@ def add_expense_from_image(chat_id: str, image_path: str, caption: Optional[str]
 
     fields = _extract_fields(ocr_text)
     remarks = caption.strip() if caption and caption.strip() else fields["remarks"]
-    category = _classify_category(fields["recipient"], remarks)
+    category = _classify_category(fields["recipient"], remarks, extra_context=ocr_text)
 
     RECEIPTS_DIR.mkdir(parents=True, exist_ok=True)
     stored_name = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}{Path(image_path).suffix}"
