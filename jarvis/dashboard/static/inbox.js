@@ -44,7 +44,7 @@ function formatRelativeDate(iso) {
 async function load() {
   try {
     const data = await api("/api/captures");
-    state = data;
+    state = { all: data.captures, types: data.types, statuses: data.statuses };
     populateFilters();
     render();
   } catch (err) {
