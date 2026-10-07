@@ -4,11 +4,26 @@
     <div class="error-banner" id="error-banner" style="display:none"></div>
 
     <div class="life-clock">
-      <p class="life-clock-label">Time lived</p>
-      <div class="life-clock-age" id="lc-age">&nbsp;</div>
+      <div class="life-ring-wrap">
+        <svg class="life-ring" viewBox="0 0 180 180">
+          <circle class="life-ring-track" cx="90" cy="90" r="78"></circle>
+          <circle class="life-ring-progress" id="lc-ring" cx="90" cy="90" r="78"></circle>
+        </svg>
+        <div class="life-ring-center">
+          <div class="life-ring-pct" id="lc-pct">—</div>
+          <div class="life-ring-pct-label">of an assumed life</div>
+        </div>
+      </div>
 
-      <div class="life-clock-bar-wrap"><div class="life-clock-bar" id="lc-bar"></div></div>
-      <p class="life-clock-pct" id="lc-pct">&nbsp;</p>
+      <p class="life-clock-label">Time lived</p>
+      <div class="life-stats">
+        <div class="life-stat"><div class="life-stat-value" id="lc-years">—</div><div class="life-stat-label">Years</div></div>
+        <div class="life-stat"><div class="life-stat-value" id="lc-months">—</div><div class="life-stat-label">Months</div></div>
+        <div class="life-stat"><div class="life-stat-value" id="lc-days">—</div><div class="life-stat-label">Days</div></div>
+        <div class="life-stat"><div class="life-stat-value" id="lc-hours">—</div><div class="life-stat-label">Hours</div></div>
+        <div class="life-stat"><div class="life-stat-value" id="lc-minutes">—</div><div class="life-stat-label">Min</div></div>
+        <div class="life-stat"><div class="life-stat-value" id="lc-seconds">—</div><div class="life-stat-label">Sec</div></div>
+      </div>
 
       <div class="life-clock-remaining">
         <p class="life-clock-label">Estimated time remaining</p>

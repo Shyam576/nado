@@ -76,15 +76,6 @@ function pad2(n) {
   return String(n).padStart(2, "0");
 }
 
-function formatAge(b) {
-  const parts = [];
-  if (b.years) parts.push(`${b.years} year${b.years !== 1 ? "s" : ""}`);
-  parts.push(`${b.months} month${b.months !== 1 ? "s" : ""}`);
-  parts.push(`${b.days} day${b.days !== 1 ? "s" : ""}`);
-  const clock = `${pad2(b.hours)}:${pad2(b.minutes)}:${pad2(b.seconds)}`;
-  return `${parts.join(", ")}, ${clock}`;
-}
-
 function formatRemaining(b) {
   const parts = [];
   if (b.years) parts.push(`${b.years} year${b.years !== 1 ? "s" : ""}`);
@@ -93,19 +84,36 @@ function formatRemaining(b) {
   return `~${parts.join(", ")}`;
 }
 
+// Matches the SVG circle's r="78" in index.html — kept as one constant
+// rather than reading the attribute every tick, since it never changes.
+const RING_RADIUS = 78;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
+function setRing(pct) {
+  const circle = document.getElementById("lc-ring");
+  circle.style.strokeDasharray = `${RING_CIRCUMFERENCE}`;
+  circle.style.strokeDashoffset = `${RING_CIRCUMFERENCE * (1 - pct / 100)}`;
+}
+
 function tick() {
   if (!dob) return;
   const now = new Date();
+  const lived = diffBreakdown(dob, now);
 
-  document.getElementById("lc-age").textContent = formatAge(diffBreakdown(dob, now));
+  document.getElementById("lc-years").textContent = lived.years;
+  document.getElementById("lc-months").textContent = lived.months;
+  document.getElementById("lc-days").textContent = lived.days;
+  document.getElementById("lc-hours").textContent = pad2(lived.hours);
+  document.getElementById("lc-minutes").textContent = pad2(lived.minutes);
+  document.getElementById("lc-seconds").textContent = pad2(lived.seconds);
 
   const target = addYears(dob, assumedLifespanYears);
   const totalMs = target - dob;
   const elapsedMs = now - dob;
   const pct = Math.max(0, Math.min(100, (elapsedMs / totalMs) * 100));
 
-  document.getElementById("lc-bar").style.width = `${pct}%`;
-  document.getElementById("lc-pct").textContent = `${pct.toFixed(1)}% of an assumed lifespan lived`;
+  setRing(pct);
+  document.getElementById("lc-pct").textContent = `${pct.toFixed(1)}%`;
 
   const remainingEl = document.getElementById("lc-remaining");
   if (target > now) {
