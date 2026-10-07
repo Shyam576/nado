@@ -33,7 +33,7 @@ from bot import notifier
 from bot.commands import dispatch
 from brain import ask
 from config import OWNER_ID, TELEGRAM_ALLOWED_CHAT_IDS, TELEGRAM_BOT_TOKEN, TIMEZONE
-from modules import activity, devops, digest, email_watcher, expenses, finance, habits, intent, nudges, people, tasks, transcription
+from modules import activity, devops, digest, email_watcher, expenses, finance, habits, intent, life_clock, nudges, people, tasks, transcription
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +52,7 @@ ACTIVITY_SAMPLE_POLL_SECONDS = activity.SAMPLE_INTERVAL_MINUTES * 60
 PEOPLE_CHECK_POLL_SECONDS = 21600  # 6 hours — same daily-cadence reasoning as habit gaps
 EVENING_REVIEW_NUDGE_HOUR = 20  # 8 PM — ahead of EVENING_NUDGE_HOUR (expenses) so they don't land together
 NO_PRIORITIES_NUDGE_HOUR = 10  # mid-morning — same reasoning as STALE_TASK_HOUR
+LIFE_CLOCK_HOUR = 8  # early morning, ahead of the stale-task/no-priorities nudges at 10
 
 
 async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -361,6 +362,17 @@ async def _send_daily_digest(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.exception("Failed to build/deliver daily digest: %s", exc)
 
 
+async def _send_life_clock_notification(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Job-queue callback: once-daily morning life-clock snapshot (years/months/days only —
+    see modules/life_clock.py's module docstring for why this doesn't need the dashboard's
+    live hours/minutes/seconds precision)."""
+    try:
+        text = life_clock.describe_countdown()
+        await notifier.broadcast(text)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Life clock notification failed: %s", exc)
+
+
 def build_application() -> Application:
     """Construct and configure the Telegram Application (does not connect yet)."""
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
@@ -425,6 +437,10 @@ def build_application() -> Application:
     application.job_queue.run_daily(
         _send_no_priorities_nudge,
         time=datetime.time(hour=NO_PRIORITIES_NUDGE_HOUR, minute=30, tzinfo=local_tz),
+    )
+    application.job_queue.run_daily(
+        _send_life_clock_notification,
+        time=datetime.time(hour=LIFE_CLOCK_HOUR, minute=0, tzinfo=local_tz),
     )
     return application
 
