@@ -143,6 +143,28 @@ button:disabled { opacity: .5; cursor: default; }
 .capture-actions { display: flex; gap: .4rem; margin-top: .4rem; }
 .capture-actions button { padding: .4rem .7rem; font-size: .78rem; }
 
+/* --- Life clock (landing page) --- */
+.life-clock { text-align: center; padding: 1.5rem 0 .5rem; }
+.life-clock-label { color: var(--muted); font-size: .8rem; margin: 0 0 .4rem; }
+.life-clock-age {
+  font-size: 1.6rem; font-weight: 700; line-height: 1.4; margin-bottom: 1.25rem;
+  font-variant-numeric: tabular-nums;
+}
+.life-clock-bar-wrap {
+  background: var(--border); border-radius: 999px; height: 8px; overflow: hidden;
+  margin: 0 auto .6rem; max-width: 420px;
+}
+.life-clock-bar { background: var(--accent); height: 100%; width: 0%; transition: width .4s ease; }
+.life-clock-pct { color: var(--muted); font-size: .78rem; margin: 0 0 2rem; }
+.life-clock-remaining { border-top: 1px solid var(--border); padding-top: 1.5rem; }
+.life-clock-remaining-value { font-size: 1.15rem; font-weight: 600; margin-bottom: 1rem; }
+.life-clock-lifespan-form {
+  display: flex; justify-content: center; align-items: center; flex-wrap: wrap;
+  gap: .5rem; font-size: .82rem; color: var(--muted);
+}
+.life-clock-lifespan-form input[type=number] { width: 4.5rem; flex: none; text-align: center; }
+.life-clock-lifespan-form button { flex: none; }
+
 /* --- Charts (dataviz-skill palette + spec — see style.md/palette.md) --- */
 .viz-root {
   --chart-surface: #fcfcfb; --chart-ink: #0b0b0b; --chart-ink-secondary: #52514e;

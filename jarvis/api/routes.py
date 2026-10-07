@@ -33,6 +33,8 @@ from api.models import (
     DailyPlanOut,
     EveningReviewIn,
     HeaderOut,
+    LifeClockIn,
+    LifeClockOut,
     MoneyOut,
     MoodOut,
     MorningPlanIn,
@@ -55,7 +57,7 @@ from api.models import (
     WeekOut,
 )
 from config import OWNER_ID
-from modules import calendar_app, captures, devops, execution, expenses, finance, habits, people, tasks
+from modules import calendar_app, captures, devops, execution, expenses, finance, habits, life_clock, people, tasks
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_session)])
 
@@ -341,3 +343,21 @@ def schedule_capture(capture_id: int, body: CaptureScheduleIn):
     if row is None:
         raise HTTPException(status_code=404, detail="Capture not found, or date is invalid")
     return row
+
+
+# ---------------------------------------------------------------------------
+# Life clock (dashboard landing page)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/life-clock", response_model=LifeClockOut)
+def get_life_clock():
+    return life_clock.get_config()
+
+
+@router.post("/life-clock", response_model=LifeClockOut)
+def set_life_clock(body: LifeClockIn):
+    try:
+        return life_clock.set_assumed_lifespan(body.assumed_lifespan_years)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))

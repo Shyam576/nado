@@ -281,6 +281,16 @@ PROACTIVE_POLL_SECONDS: int = 30
 TIMEZONE: str = os.environ.get("JARVIS_TIMEZONE", "Asia/Thimphu")
 
 # ---------------------------------------------------------------------------
+# Life clock (dashboard landing page)
+# ---------------------------------------------------------------------------
+
+# Date of birth, ISO 'YYYY-MM-DD' — powers the dashboard's landing-page life
+# counter (modules/life_clock.py). Personal, single-user data, same spirit
+# as OWNER_ID below; not meant to ever change, but overridable via env var
+# rather than hardcoded in the module itself.
+DATE_OF_BIRTH: str = os.environ.get("DATE_OF_BIRTH", "2001-09-06")
+
+# ---------------------------------------------------------------------------
 # Multi-platform identity
 # ---------------------------------------------------------------------------
 

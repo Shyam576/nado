@@ -408,3 +408,17 @@ class CaptureListOut(BaseModel):
     captures: list[CaptureOut]
     types: list[str]
     statuses: list[str]
+
+
+# ---------------------------------------------------------------------------
+# Life clock (dashboard landing page)
+# ---------------------------------------------------------------------------
+
+
+class LifeClockOut(BaseModel):
+    date_of_birth: str
+    assumed_lifespan_years: float
+
+
+class LifeClockIn(BaseModel):
+    assumed_lifespan_years: float = Field(gt=0)

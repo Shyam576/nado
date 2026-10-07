@@ -40,7 +40,13 @@ def create_app() -> FastAPI:
     async def index(request: Request):
         if (redirect := require_page_auth(request)) is not None:
             return redirect
-        return templates.TemplateResponse(request, "index.html", {"active_page": "today"})
+        return templates.TemplateResponse(request, "index.html", {"active_page": "home"})
+
+    @app.get("/today")
+    async def today_page(request: Request):
+        if (redirect := require_page_auth(request)) is not None:
+            return redirect
+        return templates.TemplateResponse(request, "today.html", {"active_page": "today"})
 
     @app.get("/week")
     async def week_page(request: Request):
